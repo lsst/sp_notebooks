@@ -1,12 +1,4 @@
 # sp_notebooks
-System Performance analysis  Notebooks
+System Performance Notebooks
 
-## Development
-
-This repository uses Pre-commit to keep notebooks formatted and clean. Install Pre-commit by running:
-
-```bash
-pip install pre-commit
-pre-commit install
-```
-
+Repository for Rubin times-square notebooks that analyse the performance of the integrated Rubin System
