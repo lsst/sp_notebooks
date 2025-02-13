@@ -1,0 +1,18 @@
+title: Survey Performance Estimate
+description: Current estimate of the Survey Performance
+authors:
+  - name: Leanne Guy, Željko Ivezić
+    slack: leannep
+parameters:
+  date:
+    type: string
+    description: Date of summary (YYYY-MM-DD)
+    default: "2024-09-04"
+  instrument:
+    type: string
+    description: Instrument ("LSSTCam", "LSSTComCam")
+    default: "LSSTCam"
+  telescope:
+    type: string
+    description: The telescope to compute the performance for
+    default: "Simonyi"
