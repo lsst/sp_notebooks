@@ -8,7 +8,7 @@ parameters:
     type: string
     description: "Date of observation (YYYYMMDD)"
     format: dayobs
-    dynamic_default: "yesterday"
+    dynamic_default: "today"
   n_days:
     type: number
     description: "Number of nights to include"
