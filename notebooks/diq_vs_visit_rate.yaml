@@ -4,16 +4,15 @@ authors:
   - name: Lynne Jones
     slack: Lynne
 parameters:
-  day_obs_min:
-    type: string
-    description: "Earliest dayobs (YYYYMMDD)"
-    format: dayobs
-    default: 20260107
   day_obs_max:
     type: string
     description: "Last dayobs (YYYYMMDD)"
     format: dayobs
     dynamic_default: "today"
+  n_nights:
+    type: number
+    description: "Number of nights, up to and including day_obs_max"
+    default: 14
 schedule:
   - freq: "daily"
     hour: 13
