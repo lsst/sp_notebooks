@@ -1,0 +1,24 @@
+title: Weekly Metrics
+description: Weekly survey-progress and engineering-health summary for the community
+authors:
+  - name: Brian Stalder
+    slack: Brian Stalder
+parameters:
+  day_obs_max:
+    type: string
+    description: "Last dayobs of the reporting window (YYYYMMDD)"
+    format: dayobs
+    dynamic_default: "today"
+  n_days:
+    type: number
+    description: "Number of nights in the weekly window, up to and including day_obs_max"
+    default: 7
+  season_start_day_obs:
+    type: number
+    description: "First dayobs of steady-state LSST operations (season-to-date start)"
+    default: 20260629
+schedule:
+  - freq: "weekly"
+    weekday:
+      - day: "monday"
+    hour: 14
