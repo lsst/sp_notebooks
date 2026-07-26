@@ -1,0 +1,13 @@
+title: On-sky Utilization
+description: On-sky time utilization and gap analysis for SV / early operations
+authors:
+  - name: Brian Stalder
+parameters:
+  day_obs_min:
+    type: number
+    description: "First dayobs (YYYYMMDD)"
+    default: 20260629
+  day_obs_max:
+    type: number
+    description: "Last dayobs (YYYYMMDD)"
+    default: 20260713
