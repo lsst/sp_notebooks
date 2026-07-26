@@ -1,0 +1,13 @@
+title: Image Quality Trending
+description: PSF and delivered image quality trends over a range of nights
+authors:
+  - name: Brian Stalder
+parameters:
+  day_obs_min:
+    type: number
+    description: "First dayobs (YYYYMMDD)"
+    default: 20251026
+  day_obs_max:
+    type: number
+    description: "Last dayobs (YYYYMMDD)"
+    default: 20260604
