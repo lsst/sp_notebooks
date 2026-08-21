@@ -87,9 +87,12 @@ SDF login node), which imposes two constraints worth knowing when editing them:
   on a login node. `efficiency.ipynb` instead probes for a readable
   `rubin_sim_data` directory and sets `RUBIN_SIM_DATA_DIR` only if it is not already
   set — needed for the site models (sunset/sunrise, seeing).
-- **Coerce sidecar parameters.** Times Square substitutes parameters as **strings**,
-  while the notebook's own defaults cell may produce ints. Notebooks that do arithmetic
-  on a `day_obs` cast it explicitly (`day_obs = int(day_obs)`) in the bootstrap cell.
+- **Coerce sidecar parameters, and don't rely on the parameters cell for imports.**
+  Times Square substitutes parameters as **strings**, and a `format: dayobs` parameter
+  arrives *dashed* (`"2026-08-21"`), so a bare `int()` raises `ValueError` — use
+  `rn_dayobs.day_obs_str_to_int()`, which accepts both that and `"20260821"`. Note also
+  that Times Square replaces the whole first code cell, discarding any imports it held,
+  so the bootstrap cell must import what it uses rather than inheriting from above.
 
 Keep imports limited to what a notebook actually uses; an unused import of a package
 that is absent from the target environment breaks the whole notebook for no benefit.
