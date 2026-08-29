@@ -18,7 +18,7 @@ login node).
 | Notebook | What it measures | Key parameters |
 |----------|------------------|----------------|
 | [`diq_vs_visit_rate.ipynb`](notebooks/diq_vs_visit_rate.ipynb) | Science-visit acquisition rate and delivered image quality (DIQ) over the last `n_nights`, placed on a visit-rate vs. image-quality plane against the "LSST = 1" goal. | `day_obs_max`, `n_nights` |
-| [`efficiency.ipynb`](notebooks/efficiency.ipynb) | On-sky observing efficiency: modeled slew/settle overheads vs. actual visit gaps, plus dome-open hours and narrative-log fault/weather time, extrapolated to a per-night system availability × `fO`. | `day_obs`, `n_days` |
+| [`efficiency.ipynb`](notebooks/efficiency.ipynb) | On-sky observing efficiency: modeled slew/settle overheads vs. actual visit gaps, plus dome-open hours, narrative-log fault/weather time, and EFD-recorded observatory states, extrapolated to a per-night system availability × `fO`. | `day_obs`, `n_days` |
 | [`image_quality_trending.ipynb`](notebooks/image_quality_trending.ipynb) | PSF / delivered image-quality trends across a night range: per-detector and per-visit FWHM, ellipticity and moment-score distributions, decomposing DIQ into atmosphere / optics+camera / across-FoV variation. | `day_obs_min`, `day_obs_max` |
 | [`on-sky_utilization.ipynb`](notebooks/on-sky_utilization.ipynb) | On-sky time utilization: visit timeline vs. twilight, acquired-vs-ideal visit rate, and inter-visit gap-time trending. | `day_obs_min`, `day_obs_max` |
 
@@ -39,6 +39,34 @@ substitutes parameters, so a following bootstrap cell detects the Times Square r
 via the resulting `NameError` and pip-installs / upgrades `rubin_nights` in the
 Nublado pod; elsewhere (e.g. an SDF login node) that cell is a no-op.
 
+## Fault / idle accounting in `efficiency.ipynb`
+
+`efficiency.ipynb` carries three independent accountings of lost time, which do not
+agree and are not interchangeable:
+
+| Column(s) | Source | Nature |
+|-----------|--------|--------|
+| `total_fault_idle`, `total_fault_idle_gap` | inferred from `visit_gap` minus the modeled slew | derived |
+| `log_fault`, `log_weather` | narrative log | human-reported |
+| `fault_down`, `idle_down`, `weather_down`, `downtime_down`, `state_fault_idle` | EFD observatory states, via `rubin_nights.observatory_status` | recorded |
+
+Only the inferred `total_fault_idle_gap` feeds `ratio_active`, and therefore `eff_all`.
+Because it is measured *between consecutive visits*, it cannot see time on a night when
+observing stopped outright — a full-night fault, or a weather-shuttered night with no
+visits, yields no gaps and so contributes no inferred fault time. Such nights are `NaN`
+(not zero) in the inferred columns and drop out of the `np.nanmean` availability
+figures. Read `eff_all` / `eff_fbs` as availability **conditional on observing having
+happened**, not as a fraction of all calendar nights; the notebook prints a per-night
+comparison table and flags nights where the inferred and recorded values diverge
+sharply.
+
+Note the EFD state periods **overlap** and must not be summed: a `WEATHER` period
+typically spans the whole night while `OPERATIONAL` / `IDLE` / `FAULT` run inside it, so
+the per-night columns can total well over `night_hours`. `count_observatory_states`
+de-overlaps only `FAULT` occurring during `DOWNTIME` (via its `contributed_hours`
+column). Treat each column as "hours during which this was true", not as a partition of
+the night.
+
 ## Development
 
 This repository uses pre-commit hooks to keep notebooks consistent (including
@@ -48,3 +76,23 @@ stripping notebook outputs). Install the pre-commit by running:
 pip install pre-commit
 pre-commit install
 ```
+
+### Running the notebooks outside Times Square
+
+The notebooks are expected to run both under Times Square and standalone (e.g. on an
+SDF login node), which imposes two constraints worth knowing when editing them:
+
+- **Don't gate environment setup on `EXTERNAL_INSTANCE_URL`.** That variable is only
+  set on an RSP, so a check like `if "usdf" in current_location` silently does nothing
+  on a login node. `efficiency.ipynb` instead probes for a readable
+  `rubin_sim_data` directory and sets `RUBIN_SIM_DATA_DIR` only if it is not already
+  set — needed for the site models (sunset/sunrise, seeing).
+- **Coerce sidecar parameters, and don't rely on the parameters cell for imports.**
+  Times Square substitutes parameters as **strings**, and a `format: dayobs` parameter
+  arrives *dashed* (`"2026-08-21"`), so a bare `int()` raises `ValueError` — use
+  `rn_dayobs.day_obs_str_to_int()`, which accepts both that and `"20260821"`. Note also
+  that Times Square replaces the whole first code cell, discarding any imports it held,
+  so the bootstrap cell must import what it uses rather than inheriting from above.
+
+Keep imports limited to what a notebook actually uses; an unused import of a package
+that is absent from the target environment breaks the whole notebook for no benefit.
