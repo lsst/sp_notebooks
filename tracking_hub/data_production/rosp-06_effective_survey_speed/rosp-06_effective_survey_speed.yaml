@@ -1,0 +1,20 @@
+title: 'ROSP-6: Effective survey speed (normalized etendue, fE)'
+description: Effective survey speed (normalized etendue, fE). PTH Tier 1 metric — stub, not yet implemented.
+authors:
+  - name: Lynne Jones
+tags:
+  - pth
+  - tier-1
+  - rosp-06
+  - category-2
+  - layer-2
+  - stub
+parameters:
+  start_dayobs:
+    type: integer
+    description: First dayObs (inclusive)
+    default: 20260629
+  end_dayobs:
+    type: integer
+    description: Last dayObs (inclusive)
+    default: 20261231

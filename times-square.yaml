@@ -1,3 +1,8 @@
 enabled: true
 description: >
   System Performance analysis notebooks
+ignore:
+  # Times Square matches ignore globs with PurePosixPath.match, which has no
+  # recursive wildcard ("**" behaves like "*"). Only files directly under
+  # tracking_hub/dev/ are excluded, so keep that folder flat (see tracking_hub/README.md).
+  - "tracking_hub/dev/*"
