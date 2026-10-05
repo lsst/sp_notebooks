@@ -1,0 +1,21 @@
+title: 'Fault and downtime analysis (supports ROSP-11, ROSP-12)'
+description: >-
+  Diagnostic supporting ROSP-11 and ROSP-12, in development: per-night lost-time
+  partition (weather / downtime / fault / idle) from EFD observatory status, fault
+  hours attributed to subsystems, per-component fault rates and recovery times, and
+  cross-checks against the narrative log. Not an official metric page.
+authors:
+  - name: Brian Stalder
+tags:
+  - pth
+  - diagnostic
+  - category-1
+parameters:
+  start_dayobs:
+    type: integer
+    description: First dayObs (inclusive)
+    default: 20260629
+  end_dayobs:
+    type: integer
+    description: Last dayObs (inclusive)
+    default: 20261231
