@@ -13,7 +13,7 @@ tracking_hub/
   ops/               Category 1 - Observatory Operations      (ROSP-9, 10, 11, 12)
   data_production/   Category 2 - Data Production             (ROSP-1, 2, 4, 6, 7, 8)
   data_delivery/     Category 3 - Data Delivery & User Experience (ROSP-3, 5)
-  dev/               scratch space, not rendered by Times Square
+  dev/               scratch space, not rendered by Times Square (flat; no subfolders)
 ```
 
 Inside a category folder there is one folder per ROSP epic, named
@@ -49,6 +49,12 @@ first code cell (which Times Square replaces):
 | `end_dayobs`   | Last dayObs (inclusive)    | `20261231` |
 
 The defaults are the PTH baseline epoch, 2026-06-29 to 2026-12-31.
+
+## Scratch space
+
+`dev/` is excluded from Times Square by the `ignore` glob in the root `times-square.yaml`.
+**Keep `dev/` flat.** Times Square matches ignore globs with `PurePosixPath.match`, which
+has no recursive wildcard, so a sidecar in a subfolder like `dev/sub/x.yaml` would be published.
 
 ## Shared helper code
 
