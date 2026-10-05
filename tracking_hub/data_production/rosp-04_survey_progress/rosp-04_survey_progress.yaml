@@ -1,0 +1,20 @@
+title: 'ROSP-4: Survey progress vs. 10-year projection'
+description: Survey progress vs. 10-year projection. PTH Tier 1 metric — stub, not yet implemented.
+authors:
+  - name: Lynne Jones
+tags:
+  - pth
+  - tier-1
+  - rosp-04
+  - category-2
+  - layer-1
+  - stub
+parameters:
+  start_dayobs:
+    type: number
+    description: First dayObs (inclusive)
+    default: 20260629
+  end_dayobs:
+    type: number
+    description: Last dayObs (inclusive)
+    default: 20261231

@@ -1,3 +1,5 @@
 enabled: true
 description: >
   System Performance analysis notebooks
+ignore:
+  - "tracking_hub/dev/**"
