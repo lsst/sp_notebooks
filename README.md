@@ -57,6 +57,11 @@ and the Method Change Process.
 | [ROSP-11](tracking_hub/ops/rosp-11_time_loss_accounting/) | Time-loss accounting (weather / fault / scheduled) | Observatory Operations | Brian Stalder |
 | [ROSP-12](tracking_hub/ops/rosp-12_fault_rate_mttr/) | Fault rate, MTTR and top fault categories | Observatory Operations | Brian Stalder |
 
+Diagnostic notebooks may sit beside an official one, tagged `diagnostic` instead of
+`rosp-NN`. [`fault_downtime.ipynb`](tracking_hub/ops/rosp-11_time_loss_accounting/fault_downtime.ipynb)
+in the ROSP-11 folder is the per-night lost-time partition and fault-statistics analysis
+that both ROSP-11 and ROSP-12 depend on.
+
 `tracking_hub/dev/` is scratch space excluded from Times Square by the `ignore` glob in
 the root [`times-square.yaml`](times-square.yaml); keep it flat, since the glob is not
 recursive.
