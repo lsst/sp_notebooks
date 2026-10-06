@@ -21,9 +21,45 @@ login node).
 | [`efficiency.ipynb`](notebooks/efficiency.ipynb) | On-sky observing efficiency: modeled slew/settle overheads vs. actual visit gaps, plus dome-open hours, narrative-log fault/weather time, and EFD-recorded observatory states, extrapolated to a per-night system availability × `fO`. | `day_obs`, `n_days` |
 | [`image_quality_trending.ipynb`](notebooks/image_quality_trending.ipynb) | PSF / delivered image-quality trends across a night range: per-detector and per-visit FWHM, ellipticity and moment-score distributions, decomposing DIQ into atmosphere / optics+camera / across-FoV variation. | `day_obs_min`, `day_obs_max` |
 | [`on-sky_utilization.ipynb`](notebooks/on-sky_utilization.ipynb) | On-sky time utilization: visit timeline vs. twilight, acquired-vs-ideal visit rate, and inter-visit gap-time trending. | `day_obs_min`, `day_obs_max` |
+| [`weekly_metrics.ipynb`](notebooks/weekly_metrics.ipynb) | Weekly community-forum report: trailing-week and season-to-date open-shutter time, visits by band, delivered IQ vs. design, fault/weather downtime, open-shutter efficiency, DDF/main-survey allocation, sky coverage and depth vs. the baseline, and prompt-processing throughput. Ends with an auto-filled headline report in Discourse markdown, ready to paste into the forum. Scheduled to run weekly on Times Square (Mondays, 14:00). | `day_obs_max`, `n_days`, `season_start_day_obs` |
 
 Each notebook has a sidecar `.yaml` (e.g. [`notebooks/efficiency.yaml`](notebooks/efficiency.yaml))
 of the same name that registers it as a Times Square page.
+
+## Performance Tracking Hub (`tracking_hub/`)
+
+[`tracking_hub/`](tracking_hub/) holds one Times Square notebook per Tier 1 system-performance
+metric tracked by the
+[Performance Tracking Hub (PTH)](https://rubinobs.atlassian.net/wiki/spaces/ROSP/pages/1906802696).
+Each metric is a Jira epic, `ROSP-1` through `ROSP-12`
+(<https://rubinobs.atlassian.net/browse/ROSP-N>), and lives in its own folder
+`tracking_hub/<category>/rosp-NN_<short_name>/` with an official notebook and sidecar of
+the same name. Folder paths define the Times Square page URLs linked from Confluence and
+Jira, so metric folders must never be renamed or moved. All 12 notebooks are currently
+**stubs**: they document the metric and validate parameters but compute nothing yet.
+Every notebook takes the same `start_dayobs` / `end_dayobs` parameters, defaulting to the
+PTH baseline epoch (2026-06-29 to 2026-12-31). See
+[`tracking_hub/README.md`](tracking_hub/README.md) for layout rules, tagging, versioning,
+and the Method Change Process.
+
+| Epic | Metric | Category | Owner |
+|------|--------|----------|-------|
+| [ROSP-1](tracking_hub/data_production/rosp-01_depth/) | Single-visit and coadded depth by band | Data Production | Colin Slater |
+| [ROSP-2](tracking_hub/data_production/rosp-02_delivered_iq/) | Delivered image quality (including atmosphere) | Data Production | Elana Urbach |
+| [ROSP-3](tracking_hub/data_delivery/rosp-03_alert_latency/) | Alert generation latency and completeness | Data Delivery & User Experience | Colin Slater |
+| [ROSP-4](tracking_hub/data_production/rosp-04_survey_progress/) | Survey progress vs. 10-year projection | Data Production | Lynne Jones |
+| [ROSP-5](tracking_hub/data_delivery/rosp-05_dr_query_latency/) | Data release query and image retrieval latency | Data Delivery & User Experience | Colin Slater |
+| [ROSP-6](tracking_hub/data_production/rosp-06_effective_survey_speed/) | Effective survey speed (normalized etendue, fE) | Data Production | Lynne Jones |
+| [ROSP-7](tracking_hub/data_production/rosp-07_sdiq/) | System delivered image quality (sDIQ) | Data Production | Elana Urbach |
+| [ROSP-8](tracking_hub/data_production/rosp-08_field_star_ellipticity/) | Field star ellipticity | Data Production | Elana Urbach |
+| [ROSP-9](tracking_hub/ops/rosp-09_system_availability/) | System availability / uptime | Observatory Operations | Erik Dennihy |
+| [ROSP-10](tracking_hub/ops/rosp-10_open_shutter_slew_settle/) | Open-shutter fraction and slew/settle time | Observatory Operations | Erik Dennihy |
+| [ROSP-11](tracking_hub/ops/rosp-11_time_loss_accounting/) | Time-loss accounting (weather / fault / scheduled) | Observatory Operations | Brian Stalder |
+| [ROSP-12](tracking_hub/ops/rosp-12_fault_rate_mttr/) | Fault rate, MTTR and top fault categories | Observatory Operations | Brian Stalder |
+
+`tracking_hub/dev/` is scratch space excluded from Times Square by the `ignore` glob in
+the root [`times-square.yaml`](times-square.yaml); keep it flat, since the glob is not
+recursive.
 
 ## Times Square parameters
 
