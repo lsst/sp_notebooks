@@ -7,9 +7,9 @@ tags:
 parameters:
   day_obs_max:
     type: string
-    description: Last dayobs of the reporting window (YYYYMMDD)
+    description: Last dayobs of the reporting window (YYYYMMDD); defaults to the most recent complete night
     format: dayobs
-    dynamic_default: today
+    dynamic_default: yesterday
   n_days:
     type: number
     description: Number of nights in the weekly window, up to and including day_obs_max
