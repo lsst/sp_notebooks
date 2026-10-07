@@ -18,10 +18,10 @@ login node).
 | Notebook | What it measures | Key parameters |
 |----------|------------------|----------------|
 | [`diq_vs_visit_rate.ipynb`](notebooks/diq_vs_visit_rate.ipynb) | Science-visit acquisition rate and delivered image quality (DIQ) over the last `n_nights`, placed on a visit-rate vs. image-quality plane against the "LSST = 1" goal. | `day_obs_max`, `n_nights` |
-| [`efficiency.ipynb`](notebooks/efficiency.ipynb) | On-sky observing efficiency: modeled slew/settle overheads vs. actual visit gaps, plus dome-open hours, narrative-log fault/weather time, and EFD-recorded observatory states, extrapolated to a per-night system availability × `fO`. | `day_obs`, `n_days` |
+| [`efficiency.ipynb`](notebooks/efficiency.ipynb) | On-sky observing efficiency: modeled slew/settle overheads vs. actual visit gaps, plus dome-open hours, narrative-log fault/weather time, and EFD-recorded observatory states, extrapolated to a per-night system availability × `fO`. The notebook's own markdown explains how its three fault/idle accountings (inferred, narrative-log, EFD) differ and why they must not be summed. | `day_obs`, `n_days` |
 | [`image_quality_trending.ipynb`](notebooks/image_quality_trending.ipynb) | PSF / delivered image-quality trends across a night range: per-detector and per-visit FWHM, ellipticity and moment-score distributions, decomposing DIQ into atmosphere / optics+camera / across-FoV variation. | `day_obs_min`, `day_obs_max` |
 | [`on-sky_utilization.ipynb`](notebooks/on-sky_utilization.ipynb) | On-sky time utilization: visit timeline vs. twilight, acquired-vs-ideal visit rate, and inter-visit gap-time trending. | `day_obs_min`, `day_obs_max` |
-| [`weekly_metrics.ipynb`](notebooks/weekly_metrics.ipynb) | Weekly community-forum report: trailing-week and season-to-date open-shutter time, visits by band, delivered IQ vs. design, fault/weather downtime, open-shutter efficiency, DDF/main-survey allocation, sky coverage and depth vs. the baseline, and prompt-processing throughput. Ends with an auto-filled headline report in Discourse markdown, ready to paste into the forum. Scheduled to run weekly on Times Square (Mondays, 14:00). | `day_obs_max`, `n_days`, `season_start_day_obs` |
+| [`weekly_metrics.ipynb`](notebooks/weekly_metrics.ipynb) | Weekly community-forum report: trailing-week and season-to-date open-shutter time, visits by band, delivered IQ vs. design, fault/weather downtime, open-shutter efficiency, DDF/main-survey allocation, sky coverage and depth vs. the baseline, and prompt-processing throughput. Ends with an auto-filled plain-text headline summary for the community post. Scheduled to run weekly on Times Square (Mondays, 14:00). | `day_obs_max`, `n_days`, `season_start_day_obs` |
 
 Each notebook has a sidecar `.yaml` (e.g. [`notebooks/efficiency.yaml`](notebooks/efficiency.yaml))
 of the same name that registers it as a Times Square page.
@@ -74,34 +74,6 @@ cell sets a `not_times_square = True` flag. Times Square drops that flag when it
 substitutes parameters, so a following bootstrap cell detects the Times Square runtime
 via the resulting `NameError` and pip-installs / upgrades `rubin_nights` in the
 Nublado pod; elsewhere (e.g. an SDF login node) that cell is a no-op.
-
-## Fault / idle accounting in `efficiency.ipynb`
-
-`efficiency.ipynb` carries three independent accountings of lost time, which do not
-agree and are not interchangeable:
-
-| Column(s) | Source | Nature |
-|-----------|--------|--------|
-| `total_fault_idle`, `total_fault_idle_gap` | inferred from `visit_gap` minus the modeled slew | derived |
-| `log_fault`, `log_weather` | narrative log | human-reported |
-| `fault_down`, `idle_down`, `weather_down`, `downtime_down`, `state_fault_idle` | EFD observatory states, via `rubin_nights.observatory_status` | recorded |
-
-Only the inferred `total_fault_idle_gap` feeds `ratio_active`, and therefore `eff_all`.
-Because it is measured *between consecutive visits*, it cannot see time on a night when
-observing stopped outright — a full-night fault, or a weather-shuttered night with no
-visits, yields no gaps and so contributes no inferred fault time. Such nights are `NaN`
-(not zero) in the inferred columns and drop out of the `np.nanmean` availability
-figures. Read `eff_all` / `eff_fbs` as availability **conditional on observing having
-happened**, not as a fraction of all calendar nights; the notebook prints a per-night
-comparison table and flags nights where the inferred and recorded values diverge
-sharply.
-
-Note the EFD state periods **overlap** and must not be summed: a `WEATHER` period
-typically spans the whole night while `OPERATIONAL` / `IDLE` / `FAULT` run inside it, so
-the per-night columns can total well over `night_hours`. `count_observatory_states`
-de-overlaps only `FAULT` occurring during `DOWNTIME` (via its `contributed_hours`
-column). Treat each column as "hours during which this was true", not as a partition of
-the night.
 
 ## Development
 
