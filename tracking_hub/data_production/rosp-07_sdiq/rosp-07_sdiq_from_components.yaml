@@ -1,0 +1,63 @@
+title: 'ROSP-7 diagnostic: sDIQ built up from components'
+description: >
+  System DIQ built up in quadrature from the optical figure (aos_fwhm, checked against
+  sqrt(PSF FWHM^2 - donut blur^2)), dome + mirror seeing (donut blur^2 - atmosphere^2 - camera^2,
+  for the outer-scale-corrected DIMM and for RINGSS) and a constant camera term, compared with the
+  direct sqrt(median(PSF FWHM^2 - atmosphere^2)) estimate in aggregate, per night and visit by visit.
+authors:
+  - name: Elana Urbach
+tags:
+  - pth
+  - diagnostic
+  - sdiq
+  - category-2
+  - layer-2
+parameters:
+  start_dayobs:
+    type: integer
+    description: First dayObs (inclusive)
+    default: 20251025
+  end_dayobs:
+    type: integer
+    description: Last dayObs (inclusive)
+    default: 20260715
+  science_programs:
+    type: string
+    description: Comma-separated science programs (bare numbers become BLOCK-<n>)
+    default: "407, 408, 416, 417, 419, 421"
+  dimm_outer_scale_m:
+    type: number
+    description: Outer scale L0 in metres for the von Karman correction of the DIMM seeing
+    default: 30
+  dimm_min_wind_speed:
+    type: number
+    description: DIMM-based terms only use visits with wind_speed at or above this (m/s)
+    default: 6
+  ringss_window_minutes:
+    type: number
+    description: RINGSS measurements within +/- this many minutes of the visit midpoint are medianed
+    default: 5
+  camera_fwhm_arcsec:
+    type: number
+    description: Constant camera contribution (arcsec), added in quadrature and removed from the donut blur
+    default: 0.2
+  optical_figure_source:
+    type: string
+    description: "Optical-figure component: 'aos' (aos_fwhm) or 'psf_minus_donut' (sqrt(FWHM^2 - donut_blur^2))"
+    default: aos
+  subtract_camera_from_donut_blur:
+    type: boolean
+    description: Remove the camera term from the donut blur when forming the dome + mirror seeing
+    default: true
+  sdiq_goal_arcsec:
+    type: number
+    description: Reference line drawn at this sDIQ (arcsec)
+    default: 0.45
+  efd_name:
+    type: string
+    description: lsst_efd_client instance name
+    default: usdf_efd
+  use_cache:
+    type: boolean
+    description: Cache ConsDB/EFD pulls as parquet under ./cache (only honoured outside Times Square)
+    default: false
