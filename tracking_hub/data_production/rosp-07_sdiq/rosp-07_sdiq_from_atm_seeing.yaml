@@ -16,11 +16,11 @@ parameters:
   start_dayobs:
     type: integer
     description: First dayObs (inclusive)
-    default: 20260629
+    default: 20251025
   end_dayobs:
     type: integer
     description: Last dayObs (inclusive)
-    default: 20261231
+    default: 20260715
   science_programs:
     type: string
     description: Comma-separated science programs (bare numbers become BLOCK-<n>)
