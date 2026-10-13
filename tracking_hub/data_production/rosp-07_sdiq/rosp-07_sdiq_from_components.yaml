@@ -60,8 +60,8 @@ parameters:
     default: "112, 102"
   outdoor_temperature_source:
     type: string
-    description: "Outdoor temperature: 'consdb' (visit1.air_temp, weather tower) or an ESS temperature salIndex such as '301'"
-    default: consdb
+    description: "Outdoor air temperature: an lsst.sal.ESS.temperature salIndex (301 = weather tower) or 'consdb' (visit1.air_temp)"
+    default: "301"
   temperature_window_minutes:
     type: number
     description: Temperature readings within +/- this many minutes of the visit midpoint are medianed
