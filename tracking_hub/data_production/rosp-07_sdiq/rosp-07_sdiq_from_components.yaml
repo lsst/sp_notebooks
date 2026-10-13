@@ -1,9 +1,10 @@
 title: 'ROSP-7 diagnostic: sDIQ built up from components'
 description: >
   System DIQ built up in quadrature from the optical figure (aos_fwhm, checked against
-  sqrt(PSF FWHM^2 - donut blur^2)), dome + mirror seeing (donut blur^2 - atmosphere^2 - camera^2,
-  for the outer-scale-corrected DIMM and for RINGSS) and a constant camera term, compared with the
-  direct sqrt(median(PSF FWHM^2 - atmosphere^2)) estimate in aggregate, per night and visit by visit.
+  sqrt(PSF FWHM^2 - donut blur^2)), dome + mirror seeing (donut blur^2 - atmosphere^2 - camera^2
+  for the outer-scale-corrected DIMM and for RINGSS, and the rubin_scheduler PR 298 wind /
+  dome-temperature model) and a constant camera term, compared with the direct
+  sqrt(median(PSF FWHM^2 - atmosphere^2)) estimate in aggregate, per night and visit by visit.
 authors:
   - name: Elana Urbach
 tags:
@@ -49,6 +50,26 @@ parameters:
     type: boolean
     description: Remove the camera term from the donut blur when forming the dome + mirror seeing
     default: true
+  wind_seeing_params:
+    type: string
+    description: "Dome-seeing model parameters d0, d1, v0, t, s as key=value pairs (rubin_scheduler PR 298 defaults)"
+    default: "d0=0.20, d1=0.18, v0=2.5, t=7.5e-5, s=7.5e-5"
+  dome_temperature_ess_indices:
+    type: string
+    description: "Comma-separated lsst.sal.ESS.temperature salIndex(es) for the dome air temperature (M2 HX85 sensor: 112, formerly 102)"
+    default: "112, 102"
+  outdoor_temperature_source:
+    type: string
+    description: "Outdoor temperature: 'consdb' (visit1.air_temp, weather tower) or an ESS temperature salIndex such as '301'"
+    default: consdb
+  temperature_window_minutes:
+    type: number
+    description: Temperature readings within +/- this many minutes of the visit midpoint are medianed
+    default: 10
+  delta_t_default:
+    type: number
+    description: Dome minus outdoor temperature (K) used by the model where no reading is available
+    default: 0
   sdiq_goal_arcsec:
     type: number
     description: Reference line drawn at this sDIQ (arcsec)
