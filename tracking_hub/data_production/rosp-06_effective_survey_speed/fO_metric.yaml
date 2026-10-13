@@ -1,0 +1,14 @@
+title: fO metric
+description: Calculate fO metric, as input to fE
+authors:
+  - name: Lynne Jones
+    slack: Lynne
+parameters:
+  day_obs:
+    type: string
+    description: "DayObs at which to evaluate fO (YYYYMMDD)"
+    format: dayobs
+    dynamic_default: "today"
+schedule:
+  - freq: "daily"
+    hour: 13
