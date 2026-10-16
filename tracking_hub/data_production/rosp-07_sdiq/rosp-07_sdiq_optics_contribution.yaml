@@ -1,0 +1,60 @@
+title: 'ROSP-7 diagnostic: optics contribution and the AOS z4 target'
+description: >
+  The optical-figure term of sDIQ: aos_fwhm from the ConsDB against sqrt(PSF FWHM^2 - donut blur^2)
+  night by night and period by period (is the crossover driven by the FWHM or by the donut blur?),
+  and aos_fwhm recomputed from the per-corner Zernikes relative to the z4 target the closed loop was
+  converging to in each period, to the final post-April target everywhere, to a zero target and
+  without the defocus term, with visit-by-visit scatter across the periods.
+authors:
+  - name: Elana Urbach
+tags:
+  - pth
+  - diagnostic
+  - sdiq
+  - category-2
+  - layer-2
+parameters:
+  start_dayobs:
+    type: integer
+    description: First dayObs (inclusive)
+    default: 20251025
+  end_dayobs:
+    type: integer
+    description: Last dayObs (inclusive)
+    default: 20260715
+  science_programs:
+    type: string
+    description: Comma-separated science programs (bare numbers become BLOCK-<n>)
+    default: "407, 408, 416, 417, 419, 421"
+  z4_targets:
+    type: string
+    description: "z4 target (um) the closed loop converged each corner to, as '<first dayObs>: R00=.. R04=.. R40=.. R44=..' sets separated by ';'"
+    default: "20251025: R00=0 R04=0 R40=0 R44=0; 20251213: R00=-0.2 R04=-0.2 R40=-0.2 R44=-0.2; 20260415: R00=-0.1389 R40=-0.0328 R04=-0.0986 R44=-0.1447"
+  reference_target_dayobs:
+    type: integer
+    description: First dayObs of the target set used to recompute aos_fwhm over the whole range
+    default: 20260415
+  subtract_intrinsics:
+    type: boolean
+    description: Subtract the design (intrinsic) Zernikes before converting the residual to a PSF width
+    default: true
+  intrinsic_rotation_sign:
+    type: string
+    description: "Sign of the rotator angle used to evaluate the intrinsic Zernikes: '+1', '-1' or 'auto' (pick the one that best reproduces the stored aos_fwhm)"
+    default: auto
+  aos_log_adjustment:
+    type: boolean
+    description: Apply the 1.06 ln(1 + x) adjustment that Rapid Analysis applies to aos_fwhm
+    default: true
+  max_noll_index:
+    type: integer
+    description: Highest Zernike Noll index used (the ConsDB holds z4..z28)
+    default: 28
+  exclude_bands:
+    type: string
+    description: Comma-separated bands dropped everywhere (the donut blur is unusable in y)
+    default: "y"
+  use_cache:
+    type: boolean
+    description: Cache ConsDB pulls as parquet under ./cache (only honoured outside Times Square)
+    default: false
