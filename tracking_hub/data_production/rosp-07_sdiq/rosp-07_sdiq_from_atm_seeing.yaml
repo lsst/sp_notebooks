@@ -1,0 +1,51 @@
+title: 'ROSP-7 diagnostic: sDIQ from delivered PSF minus atmospheric seeing'
+description: >
+  System contribution to the delivered image quality, sqrt(median(PSF FWHM^2 - atmosphere^2)),
+  using the outer-scale-corrected DIMM (wind >= 6 m/s) and RINGSS scintillation seeing de-corrected
+  to each visit's airmass and band; nightly time series and cross terms with wind, pointing, aos_fwhm
+  and the seeing itself.
+authors:
+  - name: Elana Urbach
+tags:
+  - pth
+  - diagnostic
+  - sdiq
+  - category-2
+  - layer-2
+parameters:
+  start_dayobs:
+    type: integer
+    description: First dayObs (inclusive)
+    default: 20251025
+  end_dayobs:
+    type: integer
+    description: Last dayObs (inclusive)
+    default: 20260715
+  science_programs:
+    type: string
+    description: Comma-separated science programs (bare numbers become BLOCK-<n>)
+    default: "407, 408, 416, 417, 419, 421"
+  dimm_outer_scale_m:
+    type: number
+    description: Outer scale L0 in metres for the von Karman correction of the DIMM seeing
+    default: 30
+  dimm_min_wind_speed:
+    type: number
+    description: The DIMM-based sDIQ only uses visits with wind_speed at or above this (m/s)
+    default: 6
+  ringss_window_minutes:
+    type: number
+    description: RINGSS measurements within +/- this many minutes of the visit midpoint are medianed
+    default: 5
+  sdiq_goal_arcsec:
+    type: number
+    description: Reference line drawn at this sDIQ (arcsec)
+    default: 0.45
+  efd_name:
+    type: string
+    description: lsst_efd_client instance name
+    default: usdf_efd
+  use_cache:
+    type: boolean
+    description: Cache ConsDB/EFD pulls as parquet under ./cache (only honoured outside Times Square)
+    default: false
