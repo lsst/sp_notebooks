@@ -11,10 +11,13 @@ tags:
   - stub
 parameters:
   start_dayobs:
-    type: integer
-    description: First dayObs (inclusive)
-    default: 20260629
+    type: string
+    description: "First DayObs (YYYYMMDD) (inclusive)"
+    format: dayobs
+    default: "20260629"
   end_dayobs:
-    type: integer
-    description: Last dayObs (inclusive)
-    default: 20261231
+    type: string
+    description: "Last DayObs (YYYYMMDD) (inclusive)"
+    format: dayobs
+    default: "20261231"
+    #dynamic_default: today
