@@ -61,6 +61,11 @@ Diagnostic notebooks may sit beside an official one, tagged `diagnostic` instead
 `rosp-NN`. [`fault_downtime.ipynb`](tracking_hub/ops/rosp-11_time_loss_accounting/fault_downtime.ipynb)
 in the ROSP-11 folder is the per-night lost-time partition and fault-statistics analysis
 that both ROSP-11 and ROSP-12 depend on.
+Beside it, `weather_downtime_analysis.ipynb` (weather vs. hardware attribution of lost
+nights and the long-baseline weather-loss fraction) and `allsky_cloud_analysis.ipynb`
+(the all-sky camera cloud record it uses) are supporting notebooks without sidecars, so
+Times Square does not render them. They read caches on USDF built by the scripts in
+[bstalder/rubin_notebooks](https://github.com/bstalder/rubin_notebooks/tree/main/earlyoperations/system_performance).
 
 `tracking_hub/dev/` is scratch space excluded from Times Square by the `ignore` glob in
 the root [`times-square.yaml`](times-square.yaml); keep it flat, since the glob is not
