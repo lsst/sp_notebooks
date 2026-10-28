@@ -1,0 +1,104 @@
+day_obs,start_utc,end_utc,states,planned_downtime,source,notes
+20260715,2026-07-15T12:00:00,2026-07-16T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260716,2026-07-16T12:00:00,2026-07-17T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260717,2026-07-17T12:00:00,2026-07-18T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260718,2026-07-18T12:00:00,2026-07-19T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260719,2026-07-19T12:00:00,2026-07-20T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260720,2026-07-20T12:00:00,2026-07-21T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260721,2026-07-21T12:00:00,2026-07-22T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260722,2026-07-22T12:00:00,2026-07-23T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260723,2026-07-23T12:00:00,2026-07-24T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260724,2026-07-24T12:00:00,2026-07-25T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260725,2026-07-25T12:00:00,2026-07-26T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260726,2026-07-26T12:00:00,2026-07-27T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260727,2026-07-27T12:00:00,2026-07-28T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260728,2026-07-28T12:00:00,2026-07-29T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260729,2026-07-29T12:00:00,2026-07-30T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260730,2026-07-30T12:00:00,2026-07-31T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260731,2026-07-31T12:00:00,2026-08-01T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260801,2026-08-01T12:00:00,2026-08-02T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260802,2026-08-02T12:00:00,2026-08-03T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260803,2026-08-03T12:00:00,2026-08-04T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260804,2026-08-04T12:00:00,2026-08-05T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260805,2026-08-05T12:00:00,2026-08-06T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260806,2026-08-06T12:00:00,2026-08-07T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260807,2026-08-07T12:00:00,2026-08-08T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260808,2026-08-08T12:00:00,2026-08-09T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260809,2026-08-09T12:00:00,2026-08-10T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260810,2026-08-10T12:00:00,2026-08-11T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260811,2026-08-11T12:00:00,2026-08-12T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260812,2026-08-12T12:00:00,2026-08-13T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260813,2026-08-13T12:00:00,2026-08-14T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260814,2026-08-14T12:00:00,2026-08-15T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260815,2026-08-15T12:00:00,2026-08-16T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260816,2026-08-16T12:00:00,2026-08-17T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260817,2026-08-17T12:00:00,2026-08-18T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260818,2026-08-18T12:00:00,2026-08-19T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260819,2026-08-19T12:00:00,2026-08-20T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260820,2026-08-20T12:00:00,2026-08-21T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260821,2026-08-21T12:00:00,2026-08-22T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260822,2026-08-22T12:00:00,2026-08-23T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260823,2026-08-23T12:00:00,2026-08-24T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260824,2026-08-24T12:00:00,2026-08-25T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260825,2026-08-25T12:00:00,2026-08-26T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260826,2026-08-26T12:00:00,2026-08-27T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260827,2026-08-27T12:00:00,2026-08-28T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260828,2026-08-28T12:00:00,2026-08-29T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260829,2026-08-29T12:00:00,2026-08-30T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260830,2026-08-30T12:00:00,2026-08-31T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260831,2026-08-31T12:00:00,2026-09-01T12:00:00,DOWNTIME|WEATHER,FALSE,Erik Dennihy: mid-July to 1 Sep,Extreme weather event: observatory down; not counted against availability
+20260901,2026-09-01T12:00:00,2026-09-02T12:00:00,WEATHER,FALSE,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),Gemini entered planned shutdown. No weather loss data reported during shutdown.
+20260902,2026-09-02T12:00:00,2026-09-03T12:00:00,WEATHER,FALSE,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),
+20260903,2026-09-03T12:00:00,2026-09-04T12:00:00,WEATHER,FALSE,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),
+20260904,2026-09-04T12:00:00,2026-09-05T12:00:00,DOWNTIME,FALSE,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),
+20260905,2026-09-05T12:00:00,2026-09-06T12:00:00,DOWNTIME,FALSE,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),
+20260906,2026-09-06T12:00:00,2026-09-07T12:00:00,DOWNTIME,FALSE,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),
+20260907,2026-09-07T12:00:00,2026-09-08T12:00:00,DOWNTIME,FALSE,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),
+20260908,2026-09-08T12:00:00,2026-09-09T12:00:00,WEATHER,FALSE,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),
+20260909,2026-09-09T12:00:00,2026-09-10T12:00:00,WEATHER,FALSE,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),
+20260910,2026-09-10T12:00:00,2026-09-11T12:00:00,WEATHER,FALSE,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),
+20260911,2026-09-11T12:00:00,2026-09-12T12:00:00,WEATHER,FALSE,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),
+20260912,2026-09-12T12:00:00,2026-09-13T12:00:00,DOWNTIME,FALSE,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),
+20260913,2026-09-13T12:00:00,2026-09-14T12:00:00,DOWNTIME,FALSE,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),
+20260914,2026-09-14T12:00:00,2026-09-15T12:00:00,DOWNTIME,FALSE,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),
+20260915,2026-09-15T12:00:00,2026-09-16T12:00:00,DOWNTIME,TRUE,Erik Dennihy: 14 Sep to 5 Oct planned downtime,Planned downtime
+20260916,2026-09-16T12:00:00,2026-09-17T12:00:00,DOWNTIME,TRUE,Erik Dennihy: 14 Sep to 5 Oct planned downtime,Planned downtime
+20260917,2026-09-17T12:00:00,2026-09-18T12:00:00,DOWNTIME,TRUE,Erik Dennihy: 14 Sep to 5 Oct planned downtime,Planned downtime
+20260918,2026-09-18T12:00:00,2026-09-19T12:00:00,DOWNTIME,TRUE,Erik Dennihy: 14 Sep to 5 Oct planned downtime,Planned downtime
+20260919,2026-09-19T12:00:00,2026-09-20T12:00:00,DOWNTIME,TRUE,Erik Dennihy: 14 Sep to 5 Oct planned downtime,Planned downtime
+20260920,2026-09-20T12:00:00,2026-09-21T12:00:00,DOWNTIME,TRUE,Erik Dennihy: 14 Sep to 5 Oct planned downtime,Planned downtime
+20260921,2026-09-21T12:00:00,2026-09-22T12:00:00,DOWNTIME,TRUE,Erik Dennihy: 14 Sep to 5 Oct planned downtime,Planned downtime
+20260922,2026-09-22T12:00:00,2026-09-23T12:00:00,DOWNTIME,TRUE,Erik Dennihy: 14 Sep to 5 Oct planned downtime,Planned downtime
+20260923,2026-09-23T12:00:00,2026-09-24T12:00:00,DOWNTIME,TRUE,Erik Dennihy: 14 Sep to 5 Oct planned downtime,Planned downtime
+20260924,2026-09-24T12:00:00,2026-09-25T12:00:00,DOWNTIME,TRUE,Erik Dennihy: 14 Sep to 5 Oct planned downtime,Planned downtime
+20260925,2026-09-25T12:00:00,2026-09-26T12:00:00,DOWNTIME,TRUE,Erik Dennihy: 14 Sep to 5 Oct planned downtime,Planned downtime
+20260926,2026-09-26T12:00:00,2026-09-27T12:00:00,DOWNTIME,TRUE,Erik Dennihy: 14 Sep to 5 Oct planned downtime,Planned downtime
+20260927,2026-09-27T12:00:00,2026-09-28T12:00:00,DOWNTIME,TRUE,Erik Dennihy: 14 Sep to 5 Oct planned downtime,Planned downtime
+20260928,2026-09-28T12:00:00,2026-09-29T12:00:00,DOWNTIME,TRUE,Erik Dennihy: 14 Sep to 5 Oct planned downtime,Planned downtime
+20260929,2026-09-29T12:00:00,2026-09-30T12:00:00,DOWNTIME,TRUE,Erik Dennihy: 14 Sep to 5 Oct planned downtime,Planned downtime
+20260930,2026-09-30T12:00:00,2026-10-01T12:00:00,DOWNTIME,TRUE,Erik Dennihy: 14 Sep to 5 Oct planned downtime,Planned downtime
+20261001,2026-10-01T12:00:00,2026-10-02T12:00:00,DOWNTIME,TRUE,Erik Dennihy: 14 Sep to 5 Oct planned downtime,Planned downtime
+20261002,2026-10-02T12:00:00,2026-10-03T12:00:00,DOWNTIME,TRUE,Erik Dennihy: 14 Sep to 5 Oct planned downtime,Planned downtime
+20261003,2026-10-03T12:00:00,2026-10-04T12:00:00,DOWNTIME,TRUE,Erik Dennihy: 14 Sep to 5 Oct planned downtime,Planned downtime
+20261004,2026-10-04T12:00:00,2026-10-05T12:00:00,DOWNTIME,TRUE,Erik Dennihy: 14 Sep to 5 Oct planned downtime,Planned downtime
+20261005,2026-10-05T12:00:00,2026-10-06T12:00:00,WEATHER,FALSE,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),
+20261006,2026-10-06T12:00:00,2026-10-07T12:00:00,WEATHER,FALSE,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),
+20261007,2026-10-07T12:00:00,2026-10-08T12:00:00,WEATHER,FALSE,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),
+20261008,2026-10-08T12:00:00,2026-10-09T12:00:00,WEATHER,FALSE,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),
+20261009,2026-10-09T12:00:00,2026-10-10T12:00:00,DOWNTIME,FALSE,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),Gemini reported weather loss but was open for B4 observations as were other observatories.
+20261010,2026-10-10T12:00:00,2026-10-11T12:00:00,WEATHER,FALSE,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),
+20261011,2026-10-11T12:00:00,2026-10-12T12:00:00,WEATHER,FALSE,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),Partial night for both Gemini+SOAR with high humidity reported (oscillating near limits). Marking as LOST for Rubin.
+20261012,2026-10-12T12:00:00,2026-10-13T12:00:00,WEATHER,FALSE,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),
+20261013,2026-10-13T12:00:00,2026-10-14T12:00:00,WEATHER,FALSE,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),
+20261014,2026-10-14T12:00:00,2026-10-15T12:00:00,WEATHER,FALSE,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),Road closure forced team to stay at Pachon hotel (but did not affect Tololo).
+20261015,2026-10-15T12:00:00,2026-10-16T12:00:00,DOWNTIME,FALSE,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),
+20261016,2026-10-16T12:00:00,2026-10-17T12:00:00,DOWNTIME,FALSE,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),
+20261017,2026-10-17T12:00:00,2026-10-18T12:00:00,DOWNTIME,FALSE,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),
+20261018,2026-10-18T12:00:00,2026-10-19T12:00:00,WEATHER,FALSE,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),
+20261019,2026-10-19T12:00:00,2026-10-20T12:00:00,WEATHER,FALSE,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),Blanco entered Engineering block. No weather loss data reported.
+20261020,2026-10-20T12:00:00,2026-10-21T12:00:00,WEATHER,FALSE,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),
+20261021,2026-10-21T12:00:00,2026-10-22T12:00:00,WEATHER,FALSE,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),
+20261022,2026-10-22T12:00:00,2026-10-23T12:00:00,WEATHER,FALSE,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),
+20261023,2026-10-23T12:00:00,2026-10-24T12:00:00,WEATHER,FALSE,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),
+20261024,2026-10-24T12:00:00,2026-10-25T12:00:00,DOWNTIME,FALSE,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),
+20261025,2026-10-25T12:00:00,2026-10-26T12:00:00,WEATHER,FALSE,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),
