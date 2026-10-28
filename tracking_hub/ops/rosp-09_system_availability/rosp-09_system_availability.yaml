@@ -1,5 +1,9 @@
 title: 'ROSP-9: System availability / uptime'
-description: System availability / uptime. PTH Tier 1 metric — stub, not yet implemented.
+description: >
+  System availability / uptime. PTH Tier 1 metric, method v1.0 (draft). Availability is the fraction of the
+  observable night (Sun -12 to -12 deg) not lost to weather during which the observatory was not in FAULT or
+  DOWNTIME (EFD observatory state), compared with the 90% target. Planned and unplanned downtime are not yet
+  separated (ROSP-28); subsystem attribution is pending (ROSP-24, ROSP-11).
 authors:
   - name: Erik Dennihy
 tags:
@@ -8,7 +12,6 @@ tags:
   - rosp-09
   - category-1
   - layer-2
-  - stub
 parameters:
   start_dayobs:
     type: integer
@@ -16,5 +19,5 @@ parameters:
     default: 20260629
   end_dayobs:
     type: integer
-    description: Last dayObs (inclusive)
+    description: Last dayObs (inclusive); nights that have not happened yet are skipped
     default: 20261231
