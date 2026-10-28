@@ -35,8 +35,9 @@ Each metric is a Jira epic, `ROSP-1` through `ROSP-12`
 (<https://rubinobs.atlassian.net/browse/ROSP-N>), and lives in its own folder
 `tracking_hub/<category>/rosp-NN_<short_name>/` with an official notebook and sidecar of
 the same name. Folder paths define the Times Square page URLs linked from Confluence and
-Jira, so metric folders must never be renamed or moved. All 12 notebooks are currently
-**stubs**: they document the metric and validate parameters but compute nothing yet.
+Jira, so metric folders must never be renamed or moved. All 12 official notebooks are
+currently **stubs**: they document the metric and validate parameters but compute nothing
+yet; the diagnostic notebooks described below do compute.
 Every notebook takes the same `start_dayobs` / `end_dayobs` parameters, defaulting to the
 PTH baseline epoch (2026-06-29 to 2026-12-31). See
 [`tracking_hub/README.md`](tracking_hub/README.md) for layout rules, tagging, versioning,
