@@ -66,7 +66,8 @@ Beside it, `weather_downtime_analysis.ipynb` (weather vs. hardware attribution o
 nights and the long-baseline weather-loss fraction) and `allsky_cloud_analysis.ipynb`
 (the all-sky camera cloud record it uses) are supporting notebooks without sidecars, so
 Times Square does not render them. They read caches on USDF built by the scripts in
-[bstalder/rubin_notebooks](https://github.com/bstalder/rubin_notebooks/tree/main/earlyoperations/system_performance).
+[bstalder/rubin_notebooks](https://github.com/bstalder/rubin_notebooks/tree/main/earlyoperations/system_performance)
+and the all-sky camera reduction in [bstalder/rubin_allskycam](https://github.com/bstalder/rubin_allskycam).
 
 `tracking_hub/dev/` is scratch space excluded from Times Square by the `ignore` glob in
 the root [`times-square.yaml`](times-square.yaml); keep it flat, since the glob is not
