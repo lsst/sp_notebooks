@@ -3,8 +3,9 @@
 Times Square notebooks for the 12 Tier 1 system-performance metrics tracked by the
 [Performance Tracking Hub (PTH)](https://rubinobs.atlassian.net/wiki/spaces/ROSP/pages/1906802696).
 Each metric is a Jira epic, `ROSP-1` through `ROSP-12`
-(<https://rubinobs.atlassian.net/browse/ROSP-N>). All notebooks here are currently
+(<https://rubinobs.atlassian.net/browse/ROSP-N>). The official notebooks are currently
 **stubs**: they document the metric and validate parameters but compute nothing yet.
+Diagnostic notebooks beside them (see below) do compute; ROSP-11 has three.
 
 ## Layout
 

@@ -35,8 +35,9 @@ Each metric is a Jira epic, `ROSP-1` through `ROSP-12`
 (<https://rubinobs.atlassian.net/browse/ROSP-N>), and lives in its own folder
 `tracking_hub/<category>/rosp-NN_<short_name>/` with an official notebook and sidecar of
 the same name. Folder paths define the Times Square page URLs linked from Confluence and
-Jira, so metric folders must never be renamed or moved. All 12 notebooks are currently
-**stubs**: they document the metric and validate parameters but compute nothing yet.
+Jira, so metric folders must never be renamed or moved. All 12 official notebooks are
+currently **stubs**: they document the metric and validate parameters but compute nothing
+yet; the diagnostic notebooks described below do compute.
 Every notebook takes the same `start_dayobs` / `end_dayobs` parameters, defaulting to the
 PTH baseline epoch (2026-06-29 to 2026-12-31). See
 [`tracking_hub/README.md`](tracking_hub/README.md) for layout rules, tagging, versioning,
@@ -56,6 +57,17 @@ and the Method Change Process.
 | [ROSP-10](tracking_hub/ops/rosp-10_open_shutter_slew_settle/) | Open-shutter fraction and slew/settle time | Observatory Operations | Erik Dennihy |
 | [ROSP-11](tracking_hub/ops/rosp-11_time_loss_accounting/) | Time-loss accounting (weather / fault / scheduled) | Observatory Operations | Brian Stalder |
 | [ROSP-12](tracking_hub/ops/rosp-12_fault_rate_mttr/) | Fault rate, MTTR and top fault categories | Observatory Operations | Brian Stalder |
+
+Diagnostic notebooks may sit beside an official one, tagged `diagnostic` instead of
+`rosp-NN`. [`fault_downtime.ipynb`](tracking_hub/ops/rosp-11_time_loss_accounting/fault_downtime.ipynb)
+in the ROSP-11 folder is the per-night lost-time partition and fault-statistics analysis
+that both ROSP-11 and ROSP-12 depend on.
+Beside it, `weather_downtime_analysis.ipynb` (weather vs. hardware attribution of lost
+nights and the long-baseline weather-loss fraction) and `allsky_cloud_analysis.ipynb`
+(the all-sky camera cloud record it uses) are supporting notebooks without sidecars, so
+Times Square does not render them. They read caches on USDF built by the scripts in
+[bstalder/rubin_notebooks](https://github.com/bstalder/rubin_notebooks/tree/main/earlyoperations/system_performance)
+and the all-sky camera reduction in [bstalder/rubin_allskycam](https://github.com/bstalder/rubin_allskycam).
 
 `tracking_hub/dev/` is scratch space excluded from Times Square by the `ignore` glob in
 the root [`times-square.yaml`](times-square.yaml); keep it flat, since the glob is not
