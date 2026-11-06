@@ -4,6 +4,25 @@
 notebook under `tracking_hub/ops/` can read the same file and apply the same overrides. Notebooks must not import from
 each other, so each notebook reads the CSV itself.
 
+## What this file asks of the observatory states, and what it does not
+
+The Scheduler `ObservatoryState` enums (`OPERATIONAL`, `WEATHER`, `DOWNTIME`, `FAULT`, ...) record how the time was
+used. They are read first and are never edited: this file does not change the EFD, and `states` keeps the EFD
+vocabulary so anything that reads it like the Scheduler topic keeps working.
+
+The ROSP-24 ledger (ROSP-9, 11, 12) is a layer on top of the states. Everything the states do not say — engineering vs
+survey, calibration blocks, idle time, which subsystem a fault belongs to — comes from program and visit metadata
+(scheduler blocks, `observation_reason`, ConsDB visits, CSC summary states), not from the state enums. The one
+thing the ledger asks of the state system is a planned/unplanned split of `DOWNTIME` (ROSP-48); until that exists, the
+`planned_downtime` column here carries it.
+
+This file is the one place where the ledger deliberately departs from a recorded state: nights where the EFD record is
+missing (`UNKNOWN` from mid-July 2026) or known to be wrong. Each row names its evidence (`source`) so the departure is
+auditable, and the file version is recorded with every report that uses it. A corrective path for the EFD record itself
+is being discussed in OBS-2062; if that lands, rows here become redundant rather than contradictory. Reviewers of the
+state semantics (ROSP-24) only need to check this boundary: does any row here contradict a state that was recorded
+correctly?
+
 One row per override night:
 
 | Column | Meaning |
