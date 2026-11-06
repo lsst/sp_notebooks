@@ -53,7 +53,7 @@ day_obs,start_utc,end_utc,states,planned_downtime,category,source,notes
 20260904,2026-09-04T12:00:00,2026-09-05T12:00:00,DOWNTIME,FALSE,D4,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),
 20260905,2026-09-05T12:00:00,2026-09-06T12:00:00,DOWNTIME,FALSE,D4,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),
 20260906,2026-09-06T12:00:00,2026-09-07T12:00:00,DOWNTIME,FALSE,D4,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),
-20260907,2026-09-07T12:00:00,2026-09-08T12:00:00,DOWNTIME,FALSE,D4,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),
+20260907,2026-09-07T12:00:00,2026-09-08T12:00:00,DOWNTIME,FALSE,D4,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),Bus access to the summit resumed on this date weather permitting.
 20260908,2026-09-08T12:00:00,2026-09-09T12:00:00,WEATHER,FALSE,C5,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),Gemini no data; only SOAR reported >50% weather loss (Blanco open). C5 by the missing-data rule (SOAR decides).
 20260909,2026-09-09T12:00:00,2026-09-10T12:00:00,WEATHER,FALSE,C5,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),Gemini no data; only SOAR reported >50% weather loss (Blanco open). C5 by the missing-data rule (SOAR decides).
 20260910,2026-09-10T12:00:00,2026-09-11T12:00:00,WEATHER,FALSE,C4,ROSP-53_Aggregated_Weather_Loss.csv (Rubin Nightly Weather Loss Projection),
