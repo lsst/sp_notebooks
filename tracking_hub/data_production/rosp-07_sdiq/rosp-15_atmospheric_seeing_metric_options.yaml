@@ -1,0 +1,37 @@
+title: Atmospheric Seeing Options
+description: Delivered FWHM (zenith, 500 nm) minus DIMM (several outer-scale corrections) and RINGSS seeing vs wind speed
+authors:
+  - name: Elana Urbach
+parameters:
+  day_obs_min:
+    type: number
+    description: "First dayobs (YYYYMMDD)"
+    default: 20251025
+  day_obs_max:
+    type: number
+    description: "Last dayobs (YYYYMMDD)"
+    default: 20260715
+  science_programs:
+    type: string
+    description: "Comma-separated science programs (bare numbers become BLOCK-<n>)"
+    default: "365, 407, 421, 419, 408"
+  outer_scales:
+    type: string
+    description: "Comma-separated DIMM outer-scale options in metres; 'none' = no correction"
+    default: "none, 25, 30"
+  ringss_window_minutes:
+    type: number
+    description: "RINGSS measurements within +/- this many minutes of the visit midpoint are medianed"
+    default: 5
+  ringss_at_zenith:
+    type: boolean
+    description: "RINGSS seeing is already at zenith / 500 nm (false applies cos(zd)^0.6)"
+    default: true
+  use_cache:
+    type: boolean
+    description: "Cache ConsDB/EFD pulls as parquet under ./cache (only honoured outside Times Square)"
+    default: false
+  efd_name:
+    type: string
+    description: "lsst_efd_client instance name"
+    default: "usdf_efd"
