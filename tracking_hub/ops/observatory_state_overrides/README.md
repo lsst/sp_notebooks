@@ -49,7 +49,7 @@ The `WEATHER` categories are different evidence behind the same state:
 | dayObs | States | Source |
 |---|---|---|
 | 20260715 to 20260831 | `DOWNTIME\|WEATHER` | Erik Dennihy (mid-July to 1 Sep). Extreme weather event: the observatory was down, and this period is deliberately not counted against availability. |
-| 20260901 to 20260913 | `WEATHER` or `DOWNTIME` | `ROSP-53_Aggregated_Weather_Loss.csv`, column "Rubin Nightly Weather Loss Projection" (TRUE = `WEATHER`) |
+| 20260901 to 20260913 | `WEATHER` or `DOWNTIME` | `ROSP-53_Aggregated_Weather_Loss.csv`, column "Rubin Nightly Weather Loss Projection" (TRUE = `WEATHER`). Bus access resumed 7 Sep when weather permitted. |
 | 20260914 to 20261004 | `DOWNTIME`, `planned_downtime = TRUE` (B1). `DOWNTIME\|WEATHER` on 20260918 to 20260921 and 20261004, from the ROSP-53 summit-access closures (AC10, AC11, AC12) | Erik Dennihy (planned downtime, 14 Sep to 5 Oct noon UTC to noon UTC, as in ROSP-42) |
 | 20261005 to 20261025 | `WEATHER` or `DOWNTIME` | `ROSP-53_Aggregated_Weather_Loss.csv`, same column |
 
