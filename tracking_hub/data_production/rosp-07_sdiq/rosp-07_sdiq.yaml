@@ -3,7 +3,8 @@ description: >
   System contribution to the delivered image quality, sDIQ = sqrt(median(PSF FWHM^2 - atmosphere^2)) over the
   LSSTCam science visits, with the PSF FWHM as delivered (as in ROSP-2) and three atmospheric seeing estimates
   expressed at the airmass and band of each visit: RINGSS scintillation, the DIMM corrected for a finite outer
-  scale (windy visits only), and the guider mid + high layer seeing. Per monitor, all bands and per band, nightly, and as histograms.
+  scale (windy visits only), and the guider mid + high layer seeing. Per monitor, all bands and per band, nightly, as histograms,
+  and as sanity checks against elevation and per band.
   PTH Tier 1 metric, draft method.
 authors:
   - name: Elana Urbach
