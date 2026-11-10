@@ -1,5 +1,11 @@
 title: 'ROSP-7: System delivered image quality (sDIQ)'
-description: System delivered image quality (sDIQ). PTH Tier 1 metric — stub, not yet implemented.
+description: >
+  System contribution to the delivered image quality, sDIQ = sqrt(median(PSF FWHM^2 - atmosphere^2)) over the
+  LSSTCam science visits, with the PSF FWHM as delivered (as in ROSP-2) and three atmospheric seeing estimates
+  expressed at the airmass and band of each visit: RINGSS scintillation, the DIMM corrected for a finite outer
+  scale (windy visits only), and the guider mid + high layer seeing. Per monitor, all bands and per band, nightly, as histograms,
+  and as sanity checks against elevation and per band.
+  PTH Tier 1 metric, draft method.
 authors:
   - name: Elana Urbach
 tags:
@@ -8,7 +14,6 @@ tags:
   - rosp-07
   - category-2
   - layer-2
-  - stub
 parameters:
   start_dayobs:
     type: integer
@@ -18,3 +23,35 @@ parameters:
     type: integer
     description: Last dayObs (inclusive)
     default: 20261231
+  science_programs:
+    type: string
+    description: Comma-separated science programs (bare numbers become BLOCK-<n>); empty for all programs
+    default: "407, 408, 416, 417, 419, 421"
+  min_psf_stars:
+    type: integer
+    description: Drop visits with fewer PSF stars (visit1_quicklook.n_psf_star_total) than this; 0 disables the cut
+    default: 50
+  dimm_outer_scale_m:
+    type: number
+    description: Outer scale L0 in metres for the von Karman correction of the DIMM seeing; 0 disables the correction
+    default: 30
+  dimm_min_wind_speed:
+    type: number
+    description: The DIMM is only used on visits with visit1.wind_speed at or above this (m/s); 0 disables the cut
+    default: 6
+  ringss_source:
+    type: string
+    description: "RINGSS scintillation seeing per visit: 'efd' (median of the EFD measurements within the window) or 'consdb' (efd_lsstcam.visit1_efd per-visit mean)"
+    default: efd
+  ringss_window_minutes:
+    type: number
+    description: EFD RINGSS measurements within +/- this many minutes of the visit midpoint are medianed
+    default: 5
+  efd_name:
+    type: string
+    description: lsst_efd_client instance name
+    default: usdf_efd
+  use_cache:
+    type: boolean
+    description: Cache the ConsDB/EFD pulls as parquet under ./cache (only honoured outside Times Square)
+    default: false
