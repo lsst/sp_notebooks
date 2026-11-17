@@ -1,10 +1,11 @@
 title: 'Fault and downtime analysis (supports ROSP-11, ROSP-12)'
 description: >-
   Diagnostic supporting ROSP-11 and ROSP-12, in development: per-night lost-time
-  partition (weather / downtime / fault / idle) from EFD observatory status and the
-  shared ROSP-42 state override file, fault
-  hours attributed to subsystems, per-component fault rates and recovery times, and
-  cross-checks against the narrative log. Not an official metric page.
+  partition (weather / fault / downtime / idle) from EFD observatory status and the
+  shared ROSP-42 state override file, reduced by the ROSP-24 v1.0 precedence (pending
+  sign-off), with each fault run charged to its primary CSC in the ROSP-24 attribution
+  groups, per-component fault rates and recovery times, and cross-checks against the
+  narrative log (annotation only). Not an official metric page.
 authors:
   - name: Brian Stalder
 tags:
