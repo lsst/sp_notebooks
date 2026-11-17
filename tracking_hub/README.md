@@ -61,3 +61,9 @@ has no recursive wildcard, so a sidecar in a subfolder like `dev/sub/x.yaml` wou
 
 Where shared helper code should live is still to be decided. Until then, do not use
 relative imports between notebooks or folders here.
+
+ROSP-11 is the trial case: its official notebook keeps its helper functions in
+`rosp11_ledger.py` in the same folder. Times Square executes only the notebook, not a
+checkout, so the notebook imports the file when it sits beside it and otherwise fetches it
+from GitHub, and it records the file's git blob SHA in its provenance box. No other
+notebook imports it.

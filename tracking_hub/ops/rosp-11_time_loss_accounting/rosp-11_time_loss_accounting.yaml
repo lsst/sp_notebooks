@@ -1,5 +1,13 @@
 title: 'ROSP-11: Time-loss accounting (weather / fault / scheduled)'
-description: Time-loss accounting (weather / fault / scheduled). PTH Tier 1 metric — stub, not yet implemented.
+description: >
+  Time-loss ledger of the observable night (Sun -12 to -12 deg, weather not excluded). Every hour of every night is
+  assigned to one ROSP-24 category (A science, B scheduled, C weather, D fault, E idle, F unattributed) by the
+  precedence B1 -> C -> B2 -> D (D2, D1, D4, D3) -> E -> A -> F, from the EFD observatory states (applied first,
+  never edited), the shared observatory_state_overrides.csv read from main and pinned to its commit SHA, ConsDB
+  visits with the rubin_scheduler slew model, the weather tower, the dome shutter and, where available, the
+  allskycam. Reports the per-night ledger, cycle fractions by category, fault loss by subsystem group, and the
+  shadow record (weather during maintenance, faults under weather), which is never added to the totals.
+  PTH Tier 1 metric, method rosp-11-v1.0 draft on taxonomy v1.0 (pending ROSP-24 sign-off).
 authors:
   - name: Brian Stalder
 tags:
@@ -8,7 +16,7 @@ tags:
   - rosp-11
   - category-1
   - layer-3
-  - stub
+  - draft
 parameters:
   start_dayobs:
     type: integer
@@ -16,5 +24,5 @@ parameters:
     default: 20260629
   end_dayobs:
     type: integer
-    description: Last dayObs (inclusive)
+    description: Last dayObs (inclusive); nights that have not started are skipped
     default: 20261231
