@@ -10,8 +10,7 @@ Scheduler ``observatoryStatus`` message before twilight, the 30 h freshness limi
 the ROSP-42 override reader) is adapted from the supporting notebook ``fault_downtime.ipynb``.
 
 Every rule that is still pending a decision is a field of :class:`Rules` (or a row of its Weather Constraints
-table), not a literal in the code, so the notebook can print the full rule set it ran with and a change of rule
-is a change of one field.
+regime table), not a literal in the code, so the notebook can print the full rule set it ran with.
 
 Times are TAI MJD floats throughout. The EFD is UTC and is converted on read; ConsDB ``obs_start_mjd`` and
 ``obs_end_mjd`` are already TAI.
@@ -23,6 +22,7 @@ import dataclasses
 import hashlib
 import io
 import json
+import os
 import re
 import urllib.request
 from collections import OrderedDict
@@ -33,9 +33,11 @@ from astropy.time import Time, TimeDelta
 
 # Bumped whenever a function signature or a returned column changes, so the notebook can refuse a module
 # that does not match it (on Times Square the module is fetched from GitHub, not read from the checkout).
-MODULE_API_VERSION = 2
+MODULE_API_VERSION = 3
 
-TAXONOMY_VERSION = "v1.0 (pending ROSP-24 sign-off; rule updates of 2026-11-16/17)"
+TAXONOMY_VERSION = (
+    "v1.0 (pending ROSP-24 sign-off; rule updates of 2026-11-16/17, round 3)"
+)
 
 GITHUB_REPO = "lsst/sp_notebooks"
 OVERRIDES_PATH = (
@@ -100,7 +102,7 @@ SUMMARY_STATE_FAULT = 3
 
 # ROSP-24 fault attribution groups (Q5, the mapping check by the subsystem leads, is still open).
 PENDING = "Pending attribution"
-UNATTRIBUTED_FAULT = "F (unattributed)"
+OPERATIONS_DECISION = "Operations decision"
 FAULT_GROUPS = (
     "Telescope mount and structure",
     "Optics and active optics",
@@ -110,10 +112,9 @@ FAULT_GROUPS = (
     "Safety systems",
     "Observatory control software",
     "IT, networks and data services",
-    "Operations decision",
+    OPERATIONS_DECISION,
     "Site and external",
     PENDING,
-    UNATTRIBUTED_FAULT,
 )
 CSC_GROUPS = {
     "MTMount": "Telescope mount and structure",
@@ -135,6 +136,46 @@ CSC_GROUPS = {
     "ScriptQueue": "Observatory control software",
     "Watcher": "Observatory control software",
 }
+# CSCs whose summaryState is screened when a FAULT has no CSC clause (is any CSC actually in FAULT?).
+SUMMARY_SCREEN_CSCS = (
+    "MTMount",
+    "MTRotator",
+    "MTPtg",
+    "MTM1M3",
+    "MTM2",
+    "MTHexapod:1",
+    "MTHexapod:2",
+    "MTAOS",
+    "MTCamera",
+    "MTDome",
+    "MTDomeTrajectory",
+    "Scheduler:1",
+    "ScriptQueue:1",
+)
+# Cause keywords in narrative-log text -> attribution group (for a FAULT set by hand with no CSC in FAULT).
+NARRATIVE_CAUSES = (
+    (
+        "Camera",
+        r"\bcamera\b|mtcamera|\blsstcam\b|\bfes\b|filter (change|exchange|changer)|carousel|cryo|\bmcm\b|\bccs\b",
+    ),
+    (
+        "Telescope mount and structure",
+        r"\btma\b|\bmount\b|mtmount|\boss\b|rotator|azimuth|elevation|encoder|mtptg",
+    ),
+    (
+        "Optics and active optics",
+        r"m1m3|\bm2\b|hexapod|\baos\b|mirror|actuator|hardpoint",
+    ),
+    ("Dome and enclosure", r"\bdome\b|louver|aperture shutter"),
+    (
+        "Facility utilities",
+        r"dynalene|glycol|chiller|hvac|electric|power (cut|outage|failure)|generator|compressor",
+    ),
+    ("Safety systems", r"\bgis\b|interlock|e-?stop"),
+    ("Observatory control software", r"scheduler|script ?queue|watcher"),
+    ("IT, networks and data services", r"network|internet|\bdns\b|\bvpn\b"),
+)
+NARRATIVE_IGNORE = r"auxtel|latiss|\bat(dome|dometrajectory|mcs|ptg|camera|aos|hexapod|pneumatics|spectrograph|headerservice|oods|whitelight)\b"
 
 # Only the machine-generated clause, and only its current ("are in") form: "were in" is sticky and repeats long
 # after recovery. Operator text before the clause must not be searched. (From fault_downtime.ipynb.)
@@ -143,76 +184,113 @@ FAULT_CSC_WERE_RE = re.compile(
     r"components were in <State\.FAULT: \d+> state:\s*([^.]*)\."
 )
 
-# Weather Constraints versions (Confluence page 39696225), applied by the date in force. The close limits are the
-# ROSP-24 C1 limits. Every date and every re-opening value here is a PLACEHOLDER until Brian supplies the page
-# history: the 2026-10-01 wind switch is assumed (ROSP-11, 2026-11-17), and the 2026-11-06 row marks the "11/06
-# adopted version" named on ROSP-58, with values not yet known.
-DEFAULT_WEATHER_CONSTRAINTS = (
+# Weather Constraints regimes (Confluence page 39696225 history, Brian 2026-11-17). Only criteria measurable from
+# telemetry are implemented; the rest is listed in KNOWN_GAPS. Spread = T - Td at the weather tower (ESS:301).
+WEATHER_REGIMES = (
     {
-        "version": "WC-1 (placeholder)",
+        "regime": "R1",
+        "versions": "v27",
         "from_dayobs": 0,
-        "rh_close": 80.0,
-        "dpd_close": 2.0,
-        "wind_close": 15.0,
-        "gust_close": 18.0,
-        "rh_reopen": 75.0,
-        "dpd_reopen": 3.0,
-        "wind_reopen": 15.0,
-        "gust_reopen": 18.0,
-        "reopen_hold_min": 30.0,
-        "precip_hold_min": 60.0,
-        "icing_temp_c": 0.0,
-        "icing_rh": 90.0,
-        "status": "placeholder: re-opening values and date to confirm",
+        "spread_close": 2.0,  # close at once below this
+        "spread_close_sustained": None,  # (limit, minutes): close if below limit continuously
+        "inside_close": 2.0,  # any inside sensor ESS:111/112/113 within this of its dew point ...
+        "inside_close_min": 20,  # ... for this many minutes
+        "glass_close": None,  # M1M3 glass (ESS:115 item 3) within this of ESS:113 Td: close
+        "rh_do_not_open": 70.0,
+        "cloud_closes": True,  # "heavy and dark" only: the deep-index thick class
+        "reopen": "stable",  # all closing conditions clear for `stable_min`
+        "stable_min": 30,
+        "initial": "limits",  # initial opening: below limits (and RH <= rh_do_not_open)
     },
     {
-        "version": "WC-2 (placeholder, wind 20/25 m/s)",
-        "from_dayobs": 20261001,
-        "rh_close": 80.0,
-        "dpd_close": 2.0,
-        "wind_close": 20.0,
-        "gust_close": 25.0,
-        "rh_reopen": 75.0,
-        "dpd_reopen": 3.0,
-        "wind_reopen": 20.0,
-        "gust_reopen": 25.0,
-        "reopen_hold_min": 30.0,
-        "precip_hold_min": 60.0,
-        "icing_temp_c": 0.0,
-        "icing_rh": 90.0,
-        "status": "placeholder: wind-switch date 20261001 unverified",
+        "regime": "R2",
+        "versions": "v28-v36",
+        "from_dayobs": 20261014,
+        "spread_close": 2.0,
+        "spread_close_sustained": None,
+        "inside_close": 2.0,
+        "inside_close_min": 20,
+        "glass_close": None,
+        "rh_do_not_open": 70.0,
+        "cloud_closes": True,
+        "reopen": "stable",
+        "stable_min": 30,
+        "initial": "limits",
     },
     {
-        "version": "WC-3 (placeholder, adopted 2026-11-06)",
-        "from_dayobs": 20261106,
-        "rh_close": 80.0,
-        "dpd_close": 2.0,
-        "wind_close": 20.0,
-        "gust_close": 25.0,
-        "rh_reopen": 75.0,
-        "dpd_reopen": 3.0,
-        "wind_reopen": 20.0,
-        "gust_reopen": 25.0,
-        "reopen_hold_min": 30.0,
-        "precip_hold_min": 60.0,
-        "icing_temp_c": 0.0,
-        "icing_rh": 90.0,
-        "status": "placeholder: values of the 11/06 version not yet known",
+        "regime": "R3",
+        "versions": "v37-v38",
+        "from_dayobs": 20261102,
+        "spread_close": 2.0,
+        "spread_close_sustained": None,
+        "inside_close": 2.0,
+        "inside_close_min": 20,
+        "glass_close": None,
+        "rh_do_not_open": None,
+        "cloud_closes": True,
+        "reopen": "stable",
+        "stable_min": 30,
+        "initial": "limits",
+    },
+    {
+        "regime": "R4",
+        "versions": "v39+",
+        "from_dayobs": 20261107,
+        "spread_close": 1.0,
+        "spread_close_sustained": (2.0, 20),
+        "inside_close": None,
+        "inside_close_min": 20,
+        "glass_close": 2.0,
+        "rh_do_not_open": None,
+        "cloud_closes": False,
+        "reopen": "spread",  # 30-min median spread > 5 and 30-min minimum > 2, counted from the close
+        "stable_min": 30,
+        "reopen_spread_median": 5.0,
+        "reopen_spread_min": 2.0,
+        "initial": "spread",  # spread > 2 and stable or rising over 30 min
+        "initial_spread": 2.0,
     },
 )
-CONSTRAINT_FIELDS = (
-    "rh_close",
-    "dpd_close",
-    "wind_close",
-    "gust_close",
-    "rh_reopen",
-    "dpd_reopen",
-    "wind_reopen",
-    "gust_reopen",
-    "reopen_hold_min",
-    "precip_hold_min",
-    "icing_temp_c",
-    "icing_rh",
+# Wind rules by date (SCC-20 switched them on 20261005, inside R1's dates).
+WIND_REGIMES = (
+    {
+        "from_dayobs": 0,
+        "gust_close": 18.0,
+        "gust_points": 1,
+        "avg5_close": None,
+        "reopen_gust": 15.0,
+        "reopen_min": 15,
+    },
+    {
+        "from_dayobs": 20261005,
+        "gust_close": 25.0,
+        "gust_points": 3,
+        "avg5_close": 20.0,
+        "reopen_gust": 20.0,
+        "reopen_min": 15,
+    },
+)
+# Post-precipitation proposal (page 1241514042, a DRAFT): its hours are flagged provisional.
+POST_PRECIP = {
+    "rain_hold_min": 60,  # rain with T > 0 C: 30 min dry + dome drain
+    "humid_rh": 75.0,  # RH above this (or fog) with T > 0 C ...
+    "humid_hold_min": 20,  # ... 20 min safe + walk-around
+    "icing_temp_c": 0.0,  # T <= this while structures are still wet: C3 to the end of the night
+    "wet_memory_min": 120,  # how long structures count as wet after rain or a humid period
+}
+KNOWN_GAPS = (
+    "Forecast-based rules: precipitation probability, expected night-minimum temperature (not in telemetry).",
+    "Outside observations: fog, snow or ice seen on the dome or structures, 'heavy and dark' cloud judged by eye "
+    "(the deep-index thick class stands in for the latter).",
+    "Snow or sleet: ESS:301 logevent_precipitation never reports snowing, so the 'C3 until the daytime "
+    "temperature goes above 0 C' rule cannot be triggered.",
+    "R1-R3 'near limits at handover ... open only below limits with no upward trend': 'near limits' has no number; "
+    "only 'below limits' is applied.",
+    "Tier 3 judgment (operator discretion) and the walk-around itself: only the fixed hold times are applied.",
+    "Gusts 'for several data points' (R2-R4) read as >= 3 of the last 5 one-minute maxima; R2 're-open after 15 min "
+    "under 20 m/s' read as 1-min gust maxima under 20 m/s.",
+    "Inside-sensor and glass dew-point criteria use 1-min means of ESS:111/112/113 and ESS:115 item 3; a sensor "
+    "outage removes the criterion silently for that minute.",
 )
 
 
@@ -231,61 +309,66 @@ class Rules:
         "BLOCK-421",
     )
     a1_img_types: tuple = ("science",)
-    # Start-up (A3). T539 (initial alignment) is the start-up procedure, not engineering (Brian, 2026-11-17).
-    startup_programs: tuple = ("BLOCK-T539",)
-    startup_allowance_min: float = 10.0
-    # Where the allowance starts: "twilight" (-12 deg, ROSP-50 as written) or "dome_release" (the ROSP-58 Q6
-    # amendment: from dome release, with -12 deg -> release charged as D4). Release = the dome opening after it
-    # has been closed for at least `release_min_closed_min`.
-    startup_origin: str = "twilight"
-    release_min_closed_min: float = 15.0
-    startup_overrun_category: str = "D1"
-    # A2 vs D3: a visit gap is overhead up to the slew model plus this scatter.
+    # BLOCK-T539 (initial alignment): start-up when it is the first of the night, before the first science visit;
+    # otherwise recovery, charged with the interruption it follows (ROSP-58, 2026-11-17). Never B2a.
+    alignment_programs: tuple = ("BLOCK-T539",)
+    startup_allowance_min: float = 10.0  # A3 from -12 deg evening twilight (Q6, 10/26)
+    startup_overrun_category: str = (
+        "D1"  # D4 only where a delay was declared (DOWNTIME state or override D4)
+    )
+    # A recovery T539 after a weather closure: "C3" (default) or "D1".
+    t539_after_weather: str = "C3"
     gap_scatter_s: float = 10.0
     gap_fallback_s: float = 60.0
-    # D3 cap (ROSP-23): a gap longer than this, with no FAULT and no engineering inside, is E, not D3. None means
-    # the `d3_cap_quantile` of the non-fault survey-to-survey gaps in the range.
     d3_cap_s: float | None = None
     d3_cap_quantile: float = 0.99
     activity_join_min: float = 10.0
-    weather_constraints: tuple = DEFAULT_WEATHER_CONSTRAINTS
+    weather_regimes: tuple = WEATHER_REGIMES
+    wind_regimes: tuple = WIND_REGIMES
+    post_precip: tuple = tuple(POST_PRECIP.items())
+    # Cloud: the deep allskycam index (ext_deep, mag). "Unusable" (C1 closed / C2 open) and R1-R3 "heavy and
+    # dark" = the thick class, ext_deep above this. The standard index (> 0.5) is the fallback.
+    cloud_source: str = "deep"
+    cloud_ext_deep_max: float = 1.0
     cloud_index_max: float = 0.5
+    morning_margin_h: float = 1.0  # no (re-)opening within this of morning -12 deg
     dome_open_pct: float = 5.0
-    # A rain report is trusted for at most this long without a following report.
     rain_stale_h: float = 3.0
-    # Weather standby is evaluated from this many hours before evening twilight, so daytime rain or icing count.
     standby_lead_h: float = 6.0
     d2_tolerance_min: float = 30.0
     max_state_age_h: float = 30.0
     fault_onset_tolerance_s: float = 120.0
     fault_onset_lookback_h: float = 24.0
-    # A FAULT set by hand with no CSC: its hours stay in D1/D2 with group "F (unattributed)" ("D"), or move to
-    # category F ("F").
-    no_csc_fault_category: str = "D"
+    # Narrative-log window for a hand-set FAULT: from this long before the FAULT episode began to the run's end.
+    narrative_margin_min: float = 30.0
 
-    def constraints(self, day_obs):
-        """Per-element Weather Constraints values in force on day_obs (array-like), plus the version name."""
-        day_obs = np.asarray(day_obs)
-        out = {k: np.full(day_obs.shape, np.nan) for k in CONSTRAINT_FIELDS}
-        version = np.full(day_obs.shape, "", dtype=object)
-        for row in sorted(self.weather_constraints, key=lambda r: r["from_dayobs"]):
-            on = day_obs >= row["from_dayobs"]
-            for k in CONSTRAINT_FIELDS:
-                out[k][on] = row[k]
-            version[on] = row["version"]
-        out["version"] = version
+    def regime(self, day_obs):
+        rows = sorted(self.weather_regimes, key=lambda r: r["from_dayobs"])
+        out = rows[0]
+        for r in rows:
+            if day_obs >= r["from_dayobs"]:
+                out = r
         return out
 
-    def weather_table(self):
-        return pd.DataFrame(list(self.weather_constraints)).set_index("version")
+    def wind(self, day_obs):
+        rows = sorted(self.wind_regimes, key=lambda r: r["from_dayobs"])
+        out = rows[0]
+        for r in rows:
+            if day_obs >= r["from_dayobs"]:
+                out = r
+        return out
+
+    def regimes_table(self):
+        return pd.DataFrame(list(self.weather_regimes)).set_index("regime")
 
     def as_table(self):
         rows = []
         for f in dataclasses.fields(self):
-            if f.name == "weather_constraints":
-                value = f"{len(self.weather_constraints)} versions (table below)"
-            else:
-                value = getattr(self, f.name)
+            value = getattr(self, f.name)
+            if f.name in ("weather_regimes", "wind_regimes"):
+                value = f"{len(value)} rows (table below)"
+            elif f.name == "post_precip":
+                value = ", ".join(f"{k}={v}" for k, v in value)
             status, note = RULE_NOTES.get(f.name, ("", ""))
             rows.append(
                 {
@@ -301,22 +384,24 @@ class Rules:
 RULE_NOTES = {
     "taxonomy_version": (
         "pending",
-        "ROSP-24 v1.0 + Decision Log v32 rule updates (2026-11-16/17)",
+        "ROSP-24 v1.0 + Decision Log v32/v33 rule updates (2026-11-16/17)",
     ),
     "twilight_alt": ("decided", "Q1, ROSP-22"),
     "survey_programs": ("parameter", "Early Operations science blocks, as ROSP-2"),
     "a1_img_types": ("parameter", "acq/cwfs inside a survey block count as A2"),
-    "startup_programs": (
+    "alignment_programs": (
         "decided",
-        "T539 is always the start-up (Brian, ROSP-11 2026-11-17)",
+        "T539 by context: start-up or recovery (ROSP-58, 2026-11-17)",
     ),
-    "startup_allowance_min": ("decided", "Q6 / ROSP-50"),
-    "startup_origin": ("pending", "ROSP-58 Q6 amendment: 'dome_release' if accepted"),
-    "release_min_closed_min": (
-        "parameter",
-        "dome release = opening after a closure this long",
+    "startup_allowance_min": ("decided", "Q6 / ROSP-50, from -12 deg evening twilight"),
+    "startup_overrun_category": (
+        "decided",
+        "Q6 / ROSP-50; D4 where a delay was declared",
     ),
-    "startup_overrun_category": ("decided", "Q6 / ROSP-50"),
+    "t539_after_weather": (
+        "pending",
+        "recovery alignment after a weather closure: C3 (default) or D1",
+    ),
     "gap_scatter_s": ("pending", "'slew model plus normal scatter' has no number yet"),
     "gap_fallback_s": ("pending", "only where the slew model cannot be evaluated"),
     "d3_cap_s": (
@@ -325,11 +410,31 @@ RULE_NOTES = {
     ),
     "d3_cap_quantile": ("pending", "ROSP-23 proposal: 99th percentile"),
     "activity_join_min": ("pending", "how B2 activity is bridged between exposures"),
-    "weather_constraints": (
-        "pending",
-        "Weather Constraints versions: dates and re-opening values from Brian",
+    "weather_regimes": (
+        "decided",
+        "Weather Constraints R1-R4 (page 39696225 history, Brian 2026-11-17)",
     ),
-    "cloud_index_max": ("decided", "ROSP-24 C1/C2"),
+    "wind_regimes": ("decided", "wind switch 20261005 (SCC-20)"),
+    "post_precip": (
+        "provisional",
+        "page 1241514042 is a draft proposal: its C3 hours are provisional",
+    ),
+    "cloud_source": (
+        "decided",
+        "deep allskycam index (ext_deep), rubin_notebooks 5e8d76b",
+    ),
+    "cloud_ext_deep_max": (
+        "pending",
+        "thick class (> 1.0 mag) as 'unusable' / 'heavy and dark'",
+    ),
+    "cloud_index_max": (
+        "decided",
+        "ROSP-24 C1/C2 on the standard index (fallback only)",
+    ),
+    "morning_margin_h": (
+        "decided",
+        "Weather Constraints: no opening within 1 h of morning -12 deg",
+    ),
     "dome_open_pct": ("parameter", "MTDome.apertureShutter positionActual0/1"),
     "rain_stale_h": ("parameter", "ESS:301 logevent_precipitation"),
     "standby_lead_h": ("parameter", "daytime rain / icing carried into the night"),
@@ -346,9 +451,9 @@ RULE_NOTES = {
         "parameter",
         "look-back for suggested_group only (ROSP-58)",
     ),
-    "no_csc_fault_category": (
-        "pending",
-        "hand-set FAULT with no CSC 'goes to F': group F ('D') or category F ('F')",
+    "narrative_margin_min": (
+        "parameter",
+        "narrative-log window before a hand-set FAULT episode",
     ),
 }
 
@@ -444,6 +549,15 @@ class Intervals:
         out = np.zeros(t.shape, dtype=bool)
         out[ok] = t[ok] < self.ends[i[ok]]
         return out
+
+    def index_of(self, t):
+        """Index of the interval containing each t, -1 outside every interval."""
+        t = np.asarray(t, dtype=float)
+        if len(self.starts) == 0:
+            return np.full(t.shape, -1)
+        i = np.searchsorted(self.starts, t, side="right") - 1
+        ok = (i >= 0) & (t < self.ends[np.clip(i, 0, None)])
+        return np.where(ok, i, -1)
 
     def overlaps(self, start, end):
         """True if any interval overlaps [start, end)."""
@@ -600,7 +714,6 @@ def read_overrides(source=None, ref="main"):
         keep_default_na=False,
     )
     ov = prepare_overrides(ov)
-    # README mapping for the merged categories: planned DOWNTIME -> B1; otherwise WEATHER -> C1/C4/C5; else D4.
     expected = np.where(
         ov.planned_downtime & ov.has_downtime,
         "B1",
@@ -623,7 +736,7 @@ def read_overrides(source=None, ref="main"):
 
 
 # ---------------------------------------------------------------------------------------------------------------
-# Observatory state (EFD)
+# Observatory state (EFD) and fault attribution
 # ---------------------------------------------------------------------------------------------------------------
 
 
@@ -713,9 +826,9 @@ def fault_runs(intervals, messages, lookback_h=24.0):
 
     `onset_source` is where `onset_cscs` came from, all from the current ("are in") clause: "run start" (the
     run's first message), "FAULT stretch" (the earliest clause of the unbroken FAULT stretch the run continues)
-    or "later in run". A run with none of these is a FAULT with no CSC ("no CSC", typically set by hand): it goes
-    to F (unattributed), and `suggested_cscs` keeps the last clause within `lookback_h` before it, or else the
-    sticky "were in" clause of its own messages, as a suggestion only (ROSP-58).
+    or "later in run". A run with none of these has no CSC clause ("no CSC"): assign_primary_csc screens the CSC
+    summary states and, for a FAULT set by hand, the narrative log. `episode_start` is when the unbroken FAULT
+    stretch began; `suggested_cscs` keeps the last clause within `lookback_h` (or the sticky "were in" clause).
     """
     iv = intervals.copy()
     iv["is_fault"] = (iv.status >= 0) & ((iv.status & STATUS_BITS["FAULT"]) > 0)
@@ -736,6 +849,12 @@ def fault_runs(intervals, messages, lookback_h=24.0):
     for run_id, g in iv.dropna(subset=["fault_run"]).groupby("fault_run"):
         onset, onset_time, source = [], np.nan, ""
         first_msg = int(g.msg_index.iloc[0])
+        episode_start = msg_t[first_msg] if first_msg >= 0 else g.start.min()
+        if first_msg >= 0:
+            j = first_msg - 1
+            while j >= 0 and (msg_status[j] & STATUS_BITS["FAULT"]) > 0:
+                episode_start = msg_t[j]
+                j -= 1
         if first_msg >= 0 and msg_names[first_msg]:
             onset, onset_time, source = (
                 msg_names[first_msg],
@@ -772,7 +891,6 @@ def fault_runs(intervals, messages, lookback_h=24.0):
                     if names:
                         suggested, suggested_from = names, "were in"
                         break
-        all_cscs = sorted(set().union(*(set(parse_fault_cscs(n)) for n in g.note)))
         records.append(
             {
                 "fault_run": int(run_id),
@@ -780,6 +898,7 @@ def fault_runs(intervals, messages, lookback_h=24.0):
                 "start": g.start.min(),
                 "end": g.end.max(),
                 "hours": g.hours.sum(),
+                "episode_start": episode_start,
                 "onset_time": (
                     onset_time if np.isfinite(onset_time) else g.msg_time.iloc[0]
                 ),
@@ -787,7 +906,10 @@ def fault_runs(intervals, messages, lookback_h=24.0):
                 "onset_source": source or "none",
                 "suggested_cscs": suggested,
                 "suggested_from": suggested_from,
-                "all_cscs": all_cscs or list(onset),
+                "all_cscs": sorted(
+                    set().union(*(set(parse_fault_cscs(n)) for n in g.note))
+                )
+                or list(onset),
                 "first_note": g.note.iloc[0],
             }
         )
@@ -797,6 +919,7 @@ def fault_runs(intervals, messages, lookback_h=24.0):
         "start",
         "end",
         "hours",
+        "episode_start",
         "onset_time",
         "onset_cscs",
         "onset_source",
@@ -836,81 +959,177 @@ def fetch_summary_states(efd_client, cscs, t_start, t_end):
     return out
 
 
-def assign_primary_csc(runs, summary_states, rules):
-    """The primary CSC of each fault run: the first CSC of the onset set to have entered FAULT.
+def fetch_narrative(narrative_client, t_start, t_end):
+    """Simonyi narrative-log entries (TAI MJD begin/end, text) over the range."""
+    try:
+        m = narrative_client.query_log(t_start, t_end, {"limit": 50000})
+    except Exception as err:
+        print(f"  narrative log: {type(err).__name__}: {err}")
+        return pd.DataFrame(columns=["t0", "t1", "text"])
+    if len(m) == 0:
+        return pd.DataFrame(columns=["t0", "t1", "text"])
+    comp = (
+        m["component"].fillna("").astype(str)
+        if "component" in m
+        else pd.Series("", index=m.index)
+    )
+    m = m[~comp.str.contains("AuxTel", case=False)].copy()
+    begin = pd.to_datetime(m.date_begin, utc=True, format="ISO8601")
+    end = pd.to_datetime(m.date_end, utc=True, format="ISO8601")
+    text = m.message_text.fillna("").astype(str)
+    out = pd.DataFrame(
+        {
+            "t0": utc_index_to_tai_mjd(pd.DatetimeIndex(begin)),
+            "t1": utc_index_to_tai_mjd(pd.DatetimeIndex(end)),
+            "text": text.values,
+        }
+    )
+    out["t1"] = np.maximum(out.t1, out.t0)
+    return out.sort_values("t0").reset_index(drop=True)
 
-    A FAULT with no CSC (no current clause; typically set by hand) has no primary CSC: its group is
-    "F (unattributed)" and the look-back / "were in" suggestion is kept as `suggested_group` (ROSP-58).
+
+def narrative_cause(narrative, t0, t1):
+    """The attribution group named by cause keywords in the most narrative-log entries overlapping [t0, t1]
+    (Watcher alarm posts, script names, paths and sensor names are ignored; ties go to the earlier group).
+    """
+    if narrative is None or len(narrative) == 0:
+        return None, ""
+    sub = narrative[(narrative.t0 <= t1) & (narrative.t1 >= t0)]
+    names = [g for g, _ in NARRATIVE_CAUSES]
+    counts, quote = {}, {}
+    for text in sub.text:
+        low = text.lower().strip()
+        if low.startswith(
+            "alarm:"
+        ):  # Watcher alarm posts name sensor locations, not causes
+            continue
+        # Script names (take_image_lsstcam.py), file and module paths, SAL indices and ESS sensor names are not causes.
+        low = re.sub(
+            r"\S+\.py\b|/\S+|\b\w+(\.\w+){2,}\b|salindex:?\s*\d+|camera[- ]?(inlet|ess\d*)",
+            " ",
+            low,
+        )
+        if re.search(NARRATIVE_IGNORE, low) and not re.search(
+            r"simonyi|lsstcam|mtmount|tma", low
+        ):
+            continue
+        for group, pattern in NARRATIVE_CAUSES:
+            if re.search(pattern, low):  # one vote per entry and group
+                counts[group] = counts.get(group, 0) + 1
+                quote.setdefault(group, " ".join(text.split())[:110])
+    if not counts:
+        return None, ""
+    best = max(counts, key=lambda g: (counts[g], -names.index(g)))
+    return best, quote[best]
+
+
+def assign_primary_csc(runs, summary_states, rules, narrative=None):
+    """The primary CSC and group of each fault run.
+
+    A run with a CSC clause: the first CSC of the onset set to have entered FAULT (CSC summaryState decides when
+    several are named). A run without one: the CSC summary states are screened, and a CSC actually in FAULT at
+    the run's start is the primary. Otherwise the FAULT was set by hand: a narrative-log note in the same window
+    (from `narrative_margin_min` before the FAULT episode began to the run's end) that names a cause sets the
+    group; failing that the group is Operations decision (ROSP-58, 2026-11-17). The 24 h look-back stays only as
+    `suggested_group`.
     """
     tol = rules.fault_onset_tolerance_s / SECONDS_PER_DAY
     lookback = rules.fault_onset_lookback_h / 24.0
-    primary, rule, entered, suggested = [], [], [], []
+    out = {
+        k: []
+        for k in (
+            "primary_csc",
+            "primary_rule",
+            "fault_entered",
+            "group",
+            "suggested_group",
+            "narrative_quote",
+        )
+    }
     for r in runs.itertuples():
+        quote = ""
+        suggested = csc_group(r.suggested_cscs[0]) if r.suggested_cscs else ""
         if r.onset_source == "no CSC":
-            primary.append(None)
-            rule.append(
-                f"FAULT with no CSC (suggestion from the {r.suggested_from})"
-                if r.suggested_from
-                else "FAULT with no CSC"
-            )
-            entered.append(np.nan)
-            suggested.append(csc_group(r.suggested_cscs[0]) if r.suggested_cscs else "")
-            continue
-        suggested.append("")
-        best, best_t = None, np.inf
-        for csc in r.onset_cscs:
-            times, states, _ = summary_states.get(
-                csc, (np.array([]), np.array([]), None)
-            )
-            if len(times) == 0:
-                continue
-            ok = (
-                (states == SUMMARY_STATE_FAULT)
-                & (times <= r.onset_time + tol)
-                & (times >= r.onset_time - lookback)
-            )
-            if ok.any():
-                t = times[ok].max()
-                if t < best_t:
-                    best, best_t = csc, t
-        where = f" ({r.onset_source})"
-        if best is not None:
-            primary.append(best)
-            rule.append(
-                (
+            best, best_t = None, np.inf
+            for csc, (times, states, _) in summary_states.items():
+                if len(times) == 0:
+                    continue
+                k = np.searchsorted(times, r.start + tol, side="right") - 1
+                if (
+                    k >= 0
+                    and states[k] == SUMMARY_STATE_FAULT
+                    and times[k] >= r.start - lookback
+                    and times[k] < best_t
+                ):
+                    best, best_t = csc, times[k]
+            if best is not None:
+                primary, rule, entered, group = (
+                    best,
+                    "no clause; CSC in FAULT by summaryState",
+                    best_t,
+                    csc_group(best),
+                )
+            else:
+                cause, quote = narrative_cause(
+                    narrative,
+                    r.episode_start - rules.narrative_margin_min / 1440.0,
+                    r.end,
+                )
+                if cause:
+                    primary, rule, entered, group = (
+                        None,
+                        "hand-set FAULT; cause from the narrative log",
+                        np.nan,
+                        cause,
+                    )
+                else:
+                    primary, rule, entered, group = (
+                        None,
+                        "hand-set FAULT; no cause recorded",
+                        np.nan,
+                        OPERATIONS_DECISION,
+                    )
+        else:
+            best, best_t = None, np.inf
+            for csc in r.onset_cscs:
+                times, states, _ = summary_states.get(
+                    csc, (np.array([]), np.array([]), None)
+                )
+                if len(times) == 0:
+                    continue
+                ok = (
+                    (states == SUMMARY_STATE_FAULT)
+                    & (times <= r.onset_time + tol)
+                    & (times >= r.onset_time - lookback)
+                )
+                if ok.any() and times[ok].max() < best_t:
+                    best, best_t = csc, times[ok].max()
+            where = f" ({r.onset_source})"
+            if best is not None:
+                primary, entered = best, best_t
+                rule = (
                     "first to enter FAULT (summaryState)"
                     if len(r.onset_cscs) > 1
                     else "only CSC named"
-                )
-                + where
-            )
-            entered.append(best_t)
-        elif r.onset_cscs:
-            primary.append(r.onset_cscs[0])
-            rule.append(
-                (
+                ) + where
+            else:
+                primary, entered = r.onset_cscs[0], np.nan
+                rule = (
                     "first named, no summaryState match"
                     if len(r.onset_cscs) > 1
                     else "only CSC named"
-                )
-                + where
-            )
-            entered.append(np.nan)
-        else:
-            primary.append(None)
-            rule.append("no CSC in the status notes")
-            entered.append(np.nan)
+                ) + where
+            group = csc_group(primary)
+        for key, v in zip(out, (primary, rule, entered, group, suggested, quote)):
+            out[key].append(v)
     runs = runs.copy()
-    runs["primary_csc"] = primary
-    runs["primary_rule"] = rule
-    runs["fault_entered"] = entered
-    runs["group"] = [csc_group(c) if c else UNATTRIBUTED_FAULT for c in primary]
-    runs["suggested_group"] = suggested
+    for key, v in out.items():
+        runs[key] = v
     return runs
 
 
 # ---------------------------------------------------------------------------------------------------------------
-# Environment (EFD): weather tower, dome shutter, precipitation
+# Environment (EFD): weather tower, inside sensors, dome shutter, precipitation
 # ---------------------------------------------------------------------------------------------------------------
 
 
@@ -924,59 +1143,98 @@ def _influx_minutes(efd_client, select, measurement, where, t0_iso, t1_iso):
     return df if isinstance(df, pd.DataFrame) else pd.DataFrame()
 
 
+ENV_SPECS = (
+    (
+        'mean("speed") AS wind, max("speed") AS gust',
+        "lsst.sal.ESS.airFlow",
+        '"salIndex" = 301',
+    ),
+    (
+        'mean("relativeHumidityItem") AS rh',
+        "lsst.sal.ESS.relativeHumidity",
+        '"salIndex" = 301',
+    ),
+    ('mean("dewPointItem") AS dew_point', "lsst.sal.ESS.dewPoint", '"salIndex" = 301'),
+    (
+        'mean("temperatureItem0") AS air_temp',
+        "lsst.sal.ESS.temperature",
+        '"salIndex" = 301',
+    ),
+    (
+        'mean("temperatureItem0") AS t_111',
+        "lsst.sal.ESS.temperature",
+        '"salIndex" = 111',
+    ),
+    ('mean("dewPointItem") AS td_111', "lsst.sal.ESS.dewPoint", '"salIndex" = 111'),
+    (
+        'mean("temperatureItem0") AS t_112',
+        "lsst.sal.ESS.temperature",
+        '"salIndex" = 112',
+    ),
+    ('mean("dewPointItem") AS td_112', "lsst.sal.ESS.dewPoint", '"salIndex" = 112'),
+    (
+        'mean("temperatureItem0") AS t_113',
+        "lsst.sal.ESS.temperature",
+        '"salIndex" = 113',
+    ),
+    ('mean("dewPointItem") AS td_113', "lsst.sal.ESS.dewPoint", '"salIndex" = 113'),
+    (
+        'mean("temperatureItem3") AS t_glass',
+        "lsst.sal.ESS.temperature",
+        '"salIndex" = 115',
+    ),
+    (
+        'max("positionActual0") AS shutter0, max("positionActual1") AS shutter1',
+        "lsst.sal.MTDome.apertureShutter",
+        None,
+    ),
+)
+ENV_COLUMNS = [
+    "wind",
+    "gust",
+    "rh",
+    "dew_point",
+    "air_temp",
+    "t_111",
+    "td_111",
+    "t_112",
+    "td_112",
+    "t_113",
+    "td_113",
+    "t_glass",
+    "shutter0",
+    "shutter1",
+]
+
+
 def fetch_environment(efd_client, first_day_obs, last_day_obs, chunk_days=10):
-    """1-minute weather-tower (ESS:301) and dome-shutter bins over dayObs first..last (chunked: InfluxDB refuses
-    more than 20 000 GROUP BY buckets per query)."""
+    """1-minute weather-tower (ESS:301), inside-sensor (ESS:111/112/113), M1M3-glass (ESS:115 item 3) and
+    dome-shutter bins over dayObs first..last (chunked: InfluxDB refuses more than 20 000 buckets per query).
+    """
     import rubin_nights.dayobs_utils as rn_dayobs
 
     frames = []
-    specs = [
-        (
-            'mean("speed") AS wind, max("speed") AS gust',
-            "lsst.sal.ESS.airFlow",
-            '"salIndex" = 301',
-        ),
-        (
-            'mean("relativeHumidityItem") AS rh',
-            "lsst.sal.ESS.relativeHumidity",
-            '"salIndex" = 301',
-        ),
-        (
-            'mean("dewPointItem") AS dew_point',
-            "lsst.sal.ESS.dewPoint",
-            '"salIndex" = 301',
-        ),
-        (
-            'mean("temperatureItem0") AS air_temp',
-            "lsst.sal.ESS.temperature",
-            '"salIndex" = 301',
-        ),
-        (
-            'max("positionActual0") AS shutter0, max("positionActual1") AS shutter1',
-            "lsst.sal.MTDome.apertureShutter",
-            None,
-        ),
-    ]
     for lo, hi in day_obs_chunks(first_day_obs, last_day_obs, chunk_days):
         t0 = rn_dayobs.day_obs_to_time(lo).utc.isot + "Z"
         t1 = (rn_dayobs.day_obs_to_time(hi) + TimeDelta(1, format="jd")).utc.isot + "Z"
         parts = []
-        for select, measurement, where in specs:
+        for select, measurement, where in ENV_SPECS:
             try:
                 parts.append(
                     _influx_minutes(efd_client, select, measurement, where, t0, t1)
                 )
             except Exception as err:
-                print(f"  EFD {measurement} {lo}-{hi}: {type(err).__name__}: {err}")
+                print(
+                    f"  EFD {measurement} {where} {lo}-{hi}: {type(err).__name__}: {err}"
+                )
         parts = [p for p in parts if len(p)]
         if parts:
             frames.append(pd.concat(parts, axis=1))
-    cols = ["wind", "gust", "rh", "dew_point", "air_temp", "shutter0", "shutter1"]
     if not frames:
-        env = pd.DataFrame(columns=cols)
+        env = pd.DataFrame(columns=ENV_COLUMNS)
     else:
         env = pd.concat(frames).sort_index()
-        env = env[~env.index.duplicated()].reindex(columns=cols)
+        env = env[~env.index.duplicated()].reindex(columns=ENV_COLUMNS)
     env["dpd"] = env.air_temp - env.dew_point
     env["shutter"] = env[["shutter0", "shutter1"]].max(axis=1, skipna=True)
     env["t"] = utc_index_to_tai_mjd(env.index)
@@ -985,7 +1243,7 @@ def fetch_environment(efd_client, first_day_obs, last_day_obs, chunk_days=10):
 
 def fetch_precipitation(efd_client, t_start, t_end, stale_h=3.0):
     """Rain intervals (TAI MJD) from ESS:301 logevent_precipitation: raining from a True report to the next
-    False report, or for at most `stale_h` without a further report."""
+    report, or for at most `stale_h` without a further report."""
     try:
         df = efd_client.select_time_series(
             "lsst.sal.ESS.logevent_precipitation",
@@ -1009,119 +1267,52 @@ def fetch_precipitation(efd_client, t_start, t_end, stale_h=3.0):
     return Intervals.from_pairs(pairs), int(raining.sum())
 
 
-def weather_minutes(env, cam, rain, windows, rules):
-    """Per-minute weather evidence from the weather tower, the allskycam and the rain gauge, per Weather
-    Constraints version.
-
-    `bad`: a closing condition (RH, dew-point depression, wind or gust beyond the close limit; cloud index above
-    `cloud_index_max`; rain; icing). `standby` (C3) applies only with the dome closed, after a weather closure
-    (closing conditions while the dome is shut): from when the conditions clear until the re-opening criteria
-    (every re-open limit met, no cloud, no rain) have held for `reopen_hold_min`; for `precip_hold_min` after
-    rain; and, after icing, until the dome is next opened (inspection; the melt-out / icing rule is open,
-    RSO-1183). Opening the dome ends the standby. Evaluated from `standby_lead_h` before twilight so daytime
-    rain or icing carry over; no dome telemetry counts as closed.
-    """
-    cols = ["t", "day_obs", "known", "bad", "standby", "reason", "version"]
-    if len(env) == 0:
-        return pd.DataFrame(columns=cols)
-    t_env = env.t.values
-    lead = rules.standby_lead_h / 24.0
-    out = []
-    for day_obs, w in windows.iterrows():
-        sel = (t_env >= w.start - lead) & (t_env < w.end)
-        if not sel.any():
-            continue
-        e = env[sel]
-        t = e.t.values
-        c = rules.constraints(np.full(len(t), day_obs))
-        with np.errstate(invalid="ignore"):
-            lim = (
-                (e.rh.values > c["rh_close"])
-                | (e.dpd.values < c["dpd_close"])
-                | (e.wind.values > c["wind_close"])
-                | (e.gust.values > c["gust_close"])
-            )
-            reopen_ok = (
-                (e.rh.values <= c["rh_reopen"])
-                & (e.dpd.values >= c["dpd_reopen"])
-                & (e.wind.values <= c["wind_reopen"])
-                & (e.gust.values <= c["gust_reopen"])
-            )
-            icing = (e.air_temp.values <= c["icing_temp_c"]) & (
-                e.rh.values >= c["icing_rh"]
-            )
-        if cam is not None and len(cam):
-            cloud = _lookup_bins(
-                cam.t.values - 0.5 * MINUTE,
-                MINUTE,
-                cam.cloud_idx.values,
-                t + 0.5 * MINUTE,
-            )
-        else:
-            cloud = np.full(len(t), np.nan)
-        with np.errstate(invalid="ignore"):
-            cloudy = cloud > rules.cloud_index_max
-        wet = rain.contains(t + 0.5 * MINUTE)
-        with np.errstate(invalid="ignore"):
-            dome_open = e.shutter.values > rules.dome_open_pct
-        known = (
-            np.isfinite(e.rh.values) | np.isfinite(e.wind.values) | np.isfinite(cloud)
-        )
-        bad = lim | cloudy | wet | icing
-        reopen_ok = reopen_ok & ~cloudy & ~wet
-        standby = np.zeros(len(t), dtype=bool)
-        reason = np.full(len(t), "", dtype=object)
-        closed, held, iced, precip_until = False, 0.0, False, -np.inf
-        hold_n = c["reopen_hold_min"][0]
-        for i in range(len(t)):
-            if dome_open[i]:
-                # Open: no standby, and an opening ends any closure, inspection or post-rain hold.
-                closed, held, iced, precip_until = False, 0.0, False, -np.inf
-                continue
-            if icing[i]:
-                iced = True
-            if wet[i]:
-                precip_until = t[i] + c["precip_hold_min"][i] * MINUTE
-            if bad[i]:
-                closed, held = True, 0.0
-                continue
-            if iced:
-                standby[i], reason[i] = True, "icing inspection"
-                continue
-            if closed:
-                held = held + 1 if reopen_ok[i] else 0.0
-                if held >= hold_n:
-                    closed = False
-                else:
-                    standby[i], reason[i] = True, "re-opening criteria not yet met"
-            if not standby[i] and t[i] < precip_until:
-                standby[i], reason[i] = True, "post-precipitation inspection"
-        night = t >= w.start
-        out.append(
-            pd.DataFrame(
-                {
-                    "t": t[night],
-                    "day_obs": day_obs,
-                    "known": known[night],
-                    "bad": bad[night],
-                    "standby": standby[night] & known[night],
-                    "reason": reason[night],
-                    "version": c["version"][night],
-                }
-            )
-        )
-    return pd.concat(out, ignore_index=True) if out else pd.DataFrame(columns=cols)
-
-
 # ---------------------------------------------------------------------------------------------------------------
 # Allskycam (optional; SDF only)
 # ---------------------------------------------------------------------------------------------------------------
 
 
-def load_allskycam(path, first_day_obs, last_day_obs, rms_max=1.4):
-    """Allskycam frames (TAI MJD of mid-frame, cloud_idx) for the range, or None if not readable; applies the
-    night-level astrometric gate of weather_downtime_analysis. Also returns the last night in the file.
+def load_allskycam_deep(allsky_out, first_day_obs, last_day_obs):
+    """Deep allskycam index per frame (TAI MJD of mid-frame, ext_deep in mag, cloud_idx_deep) from rubin_allskycam's
+    deep_cloud/<dayObs>.parquet joined on seq to cloud/<dayObs>.parquet, as read by rubin_notebooks
+    dome_open_close_retrospective (5e8d76b). Unlike the retrospective, frames that fail `geometry_ok` are kept: they
+    are the overcast frames (no stars, so no astrometric solution; ext_deep sits at its 3-mag cap and the standard
+    index near 1), and dropping them would turn overcast time into "no cloud". Returns (frames, note, last night).
     """
+    if not os.path.isdir(os.path.join(allsky_out, "deep_cloud")):
+        return None, f"not available ({allsky_out}/deep_cloud not readable)", None
+    frames, last = [], None
+    for d in day_obs_range(first_day_obs, last_day_obs):
+        p_std = os.path.join(allsky_out, "cloud", f"{d}.parquet")
+        p_deep = os.path.join(allsky_out, "deep_cloud", f"{d}.parquet")
+        if not (os.path.exists(p_std) and os.path.exists(p_deep)):
+            continue
+        s = pd.read_parquet(p_std, columns=["seq", "mjd", "geometry_ok", "cloud_idx"])
+        dd = pd.read_parquet(p_deep, columns=["seq", "cloud_idx_deep", "ext_deep"])
+        m = s.merge(dd, on="seq").dropna(subset=["ext_deep"])
+        if len(m):
+            m["day_obs"] = d
+            frames.append(m)
+            last = d
+    if not frames:
+        return None, f"{allsky_out}: no deep frames in range", None
+    cam = pd.concat(frames, ignore_index=True)
+    cam["geometry_ok"] = cam.geometry_ok.astype(bool)
+    cam["t"] = Time(cam.mjd.values, format="mjd", scale="utc").tai.mjd
+    cam = cam.sort_values("t").reset_index(drop=True)
+    note = (
+        f"deep index {allsky_out}/deep_cloud: {cam.day_obs.nunique()} nights in range, last {last}; "
+        f"{int((~cam.geometry_ok).sum())} of {len(cam)} frames without an astrometric solution kept (overcast)"
+    )
+    return (
+        cam[["day_obs", "t", "ext_deep", "cloud_idx_deep", "cloud_idx", "geometry_ok"]],
+        note,
+        last,
+    )
+
+
+def load_allskycam(path, first_day_obs, last_day_obs, rms_max=1.4):
+    """Standard allskycam index frames (fallback): (frames with t, cloud_idx), note, last night in the file."""
     try:
         cam = pd.read_parquet(
             path, columns=["day_obs", "mjd", "cloud_idx", "ast_mode", "ast_rms_px"]
@@ -1131,16 +1322,268 @@ def load_allskycam(path, first_day_obs, last_day_obs, rms_max=1.4):
     last_in_file = int(cam.day_obs.max()) if len(cam) else None
     cam = cam[(cam.day_obs >= first_day_obs) & (cam.day_obs <= last_day_obs)].copy()
     rms = cam[cam.ast_mode == "refine"].groupby("day_obs").ast_rms_px.median()
-    bad = rms.index[rms > rms_max]
-    cam = cam[~cam.day_obs.isin(bad)]
+    cam = cam[~cam.day_obs.isin(rms.index[rms > rms_max])]
     cam["t"] = (
         Time(cam.mjd.values, format="mjd", scale="utc").tai.mjd if len(cam) else []
     )
-    cam = cam.sort_values("t")
-    note = f"{path}; {cam.day_obs.nunique()} nights in range, file ends {last_in_file}"
-    if len(bad):
-        note += f"; astrometric gate dropped {len(bad)} night(s)"
-    return cam[["day_obs", "t", "cloud_idx"]].reset_index(drop=True), note, last_in_file
+    return (
+        cam.sort_values("t")[["day_obs", "t", "cloud_idx"]].reset_index(drop=True),
+        f"standard index {path}",
+        last_in_file,
+    )
+
+
+def cloud_flags(cam, rules):
+    """Per-frame cloudy flag for the ledger: deep index ext_deep > cloud_ext_deep_max, else standard index."""
+    if cam is None or len(cam) == 0:
+        return None
+    cam = cam.copy()
+    if rules.cloud_source == "deep" and "ext_deep" in cam:
+        cam["cloud_value"] = cam.ext_deep
+        cam["cloudy"] = cam.ext_deep > rules.cloud_ext_deep_max
+    else:
+        cam["cloud_value"] = cam.cloud_idx
+        cam["cloudy"] = cam.cloud_idx > rules.cloud_index_max
+    return cam
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Weather Constraints: closing, re-opening and standby (C3), per regime
+# ---------------------------------------------------------------------------------------------------------------
+
+
+def weather_minutes(env, cam, rain, windows, rules):
+    """Per-minute weather evidence by the Weather Constraints regime in force each night.
+
+    `close`: a closing criterion of the regime (tower spread, inside sensors or M1M3 glass near the dew point,
+    wind, rain, and for R1-R3 heavy cloud). `bad` = close or allskycam-unusable cloud (ROSP-24 C1/C2).
+    `standby` (C3) applies only with the dome closed: after a closure, until the regime's re-opening criteria are
+    met; at the start of the night, until its initial-opening criteria are met; within `morning_margin_h` of
+    morning -12 deg when the dome could not yet open; and the post-precipitation holds (provisional). An
+    opening ends any standby. `reason` names the criterion; `provisional` marks the post-precipitation proposal.
+    """
+    cols = [
+        "t",
+        "day_obs",
+        "known",
+        "close",
+        "bad",
+        "close_reason",
+        "standby",
+        "reason",
+        "provisional",
+        "regime",
+    ]
+    if len(env) == 0:
+        return pd.DataFrame(columns=cols)
+    pp = dict(rules.post_precip)
+    lead = rules.standby_lead_h / 24.0
+    t_env = env.t.values
+    out = []
+    for day_obs, w in windows.iterrows():
+        sel = (t_env >= w.start - lead) & (t_env < w.end)
+        if not sel.any():
+            continue
+        e = env[sel]
+        t = e.t.values
+        R, W = rules.regime(day_obs), rules.wind(day_obs)
+        spread = pd.Series(e.dpd.values)
+        rh, temp = e.rh.values, e.air_temp.values
+        wind, gust = pd.Series(e.wind.values), pd.Series(e.gust.values)
+        none = np.zeros(len(t), dtype=bool)
+        with np.errstate(invalid="ignore"):
+            m_spread = (spread < R["spread_close"]).values
+            m_sustained = none
+            if R["spread_close_sustained"]:
+                lim, n = R["spread_close_sustained"]
+                m_sustained = (spread < lim).astype(float).rolling(
+                    n, min_periods=n
+                ).min().values == 1
+            m_inside = none
+            if R["inside_close"] is not None:
+                m_inside = np.zeros(len(t), dtype=bool)
+                for k in ("111", "112", "113"):
+                    low = pd.Series(
+                        e[f"t_{k}"].values - e[f"td_{k}"].values < R["inside_close"]
+                    ).astype(float)
+                    m_inside |= (
+                        low.rolling(
+                            R["inside_close_min"], min_periods=R["inside_close_min"]
+                        )
+                        .min()
+                        .values
+                        == 1
+                    )
+            m_glass = none
+            if R["glass_close"] is not None:
+                m_glass = (e.t_glass.values - e.td_113.values) < R["glass_close"]
+            if W["avg5_close"]:
+                wind_close = (
+                    wind.rolling(5, min_periods=3).mean() >= W["avg5_close"]
+                ).values
+                wind_close |= (gust >= W["gust_close"]).astype(float).rolling(
+                    5, min_periods=1
+                ).sum().values >= W["gust_points"]
+            else:
+                wind_close = (gust >= W["gust_close"]).values
+        wet = rain.contains(t + 0.5 * MINUTE)
+        close = m_spread | m_sustained | m_inside | m_glass | wind_close | wet
+        if cam is not None and len(cam):
+            cloudy = (
+                _lookup_bins(
+                    cam.t.values - 0.5 * MINUTE,
+                    MINUTE,
+                    cam.cloudy.values.astype(float),
+                    t + 0.5 * MINUTE,
+                )
+                == 1
+            )
+            cloud_known = np.isfinite(
+                _lookup_bins(
+                    cam.t.values - 0.5 * MINUTE,
+                    MINUTE,
+                    cam.cloud_value.values,
+                    t + 0.5 * MINUTE,
+                )
+            )
+        else:
+            cloudy = np.zeros(len(t), dtype=bool)
+            cloud_known = np.zeros(len(t), dtype=bool)
+        if R["cloud_closes"]:
+            close |= cloudy
+        bad = close | cloudy
+        close_reason = np.select(
+            [wet, wind_close, m_spread, m_sustained, m_inside, m_glass, cloudy],
+            [
+                "rain",
+                "wind",
+                "tower spread",
+                "tower spread, sustained",
+                "inside sensor near dew point",
+                "M1M3 glass near dew point",
+                "thick cloud (allskycam)",
+            ],
+            "",
+        )
+        known = np.isfinite(rh) | np.isfinite(wind.values) | cloud_known
+        with np.errstate(invalid="ignore"):
+            dome_open = e.shutter.values > rules.dome_open_pct
+            spread_med30 = spread.rolling(30, min_periods=20).median().values
+            spread_min30 = spread.rolling(30, min_periods=20).min().values
+            spread_prev30 = spread.shift(30).values
+            gust_ok = (
+                gust.rolling(W["reopen_min"], min_periods=W["reopen_min"]).max().values
+                < W["reopen_gust"]
+            )
+            humid = (rh > pp["humid_rh"]) & (temp > pp["icing_temp_c"])
+        last_morning = w.full_end - rules.morning_margin_h / 24.0
+        standby = np.zeros(len(t), dtype=bool)
+        reason = np.full(len(t), "", dtype=object)
+        prov = np.zeros(len(t), dtype=bool)
+        closed, wind_episode, last_close, stable, iced, opened_once = (
+            False,
+            False,
+            -np.inf,
+            0,
+            False,
+            False,
+        )
+        rain_hold, humid_hold, wet_until = -np.inf, -np.inf, -np.inf
+        for i in range(len(t)):
+            if wet[i]:
+                if not temp[i] <= pp["icing_temp_c"]:
+                    rain_hold = t[i] + pp["rain_hold_min"] * MINUTE
+                wet_until = t[i] + pp["wet_memory_min"] * MINUTE
+            if humid[i]:
+                humid_hold = t[i] + pp["humid_hold_min"] * MINUTE
+                wet_until = t[i] + pp["wet_memory_min"] * MINUTE
+            if temp[i] <= pp["icing_temp_c"] and t[i] < wet_until:
+                iced = True
+            if dome_open[i]:
+                closed, wind_episode, iced, stable, opened_once = (
+                    False,
+                    False,
+                    False,
+                    0,
+                    True,
+                )
+                rain_hold = humid_hold = -np.inf
+                continue
+            if close[i]:
+                closed, last_close, stable = True, t[i], 0
+                wind_episode |= bool(wind_close[i])
+                continue
+            stable += 1
+            if t[i] < w.start:
+                continue
+            why, provisional = "", False
+            if iced:
+                why, provisional = "icing: structures wet below 0 C (provisional)", True
+            elif closed:
+                if R["reopen"] == "spread":
+                    ok = (
+                        (t[i] - last_close) * 1440 >= 30
+                        and spread_med30[i] > R["reopen_spread_median"]
+                        and spread_min30[i] > R["reopen_spread_min"]
+                    )
+                else:
+                    ok = stable >= R["stable_min"] and (
+                        R["rh_do_not_open"] is None or rh[i] <= R["rh_do_not_open"]
+                    )
+                if wind_episode:
+                    ok = ok and bool(gust_ok[i])
+                if ok and t[i] < last_morning:
+                    closed, wind_episode = False, False
+                else:
+                    why = (
+                        f"re-opening criteria not met ({R['regime']})"
+                        if t[i] < last_morning
+                        else "within 1 h of morning -12 deg"
+                    )
+            elif not opened_once:
+                if R["initial"] == "spread":
+                    prev = (
+                        spread_prev30[i] if np.isfinite(spread_prev30[i]) else -np.inf
+                    )
+                    ok = (
+                        spread.values[i] > R["initial_spread"]
+                        and spread.values[i] >= prev - 0.1
+                        and gust.values[i] < 20
+                    )
+                else:
+                    ok = R["rh_do_not_open"] is None or rh[i] <= R["rh_do_not_open"]
+                if ok and t[i] < last_morning:
+                    opened_once = True  # the criteria allowed opening; a closed dome from here is not weather
+                else:
+                    why = (
+                        f"initial-opening criteria not met ({R['regime']})"
+                        if t[i] < last_morning
+                        else "within 1 h of morning -12 deg"
+                    )
+            if not why and t[i] < rain_hold:
+                why, provisional = "post-precipitation hold (provisional)", True
+            if not why and t[i] < humid_hold:
+                why, provisional = "post-humidity hold (provisional)", True
+            if why:
+                standby[i], reason[i], prov[i] = True, why, provisional
+        night = t >= w.start
+        out.append(
+            pd.DataFrame(
+                {
+                    "t": t[night],
+                    "day_obs": day_obs,
+                    "known": known[night],
+                    "close": close[night],
+                    "bad": bad[night],
+                    "close_reason": close_reason[night],
+                    "standby": standby[night] & known[night],
+                    "reason": reason[night],
+                    "provisional": prov[night],
+                    "regime": R["regime"],
+                }
+            )
+        )
+    return pd.concat(out, ignore_index=True) if out else pd.DataFrame(columns=cols)
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -1247,19 +1690,18 @@ def survey_sequence(exposures, rules):
     """Split exposures into the evidence the ledger needs.
 
     Returns Intervals a1 (survey open shutter), a2_exp (other survey exposures), a2_gap (the allowed part of each
-    gap between consecutive survey exposures with nothing in between), activity (non-survey, non-start-up
-    exposures joined into B2 activity runs), startup (start-up-program runs, T539), the per-night first survey
-    science start, and the gap table (whose excess the ledger splits into D3 and E with the cap).
+    gap between consecutive survey exposures with nothing in between), activity (non-survey, non-alignment
+    exposures joined into B2 activity runs), alignment (T539 runs), the per-night first survey science start, and
+    the gap table (whose excess the ledger splits into D3 and E with the cap).
     """
     exp = exposures.copy()
     exp["survey"] = exp.science_program.isin(rules.survey_programs)
-    exp["startup"] = exp.science_program.isin(rules.startup_programs)
+    exp["alignment"] = exp.science_program.isin(rules.alignment_programs)
     exp["a1"] = exp.survey & exp.img_type.isin(rules.a1_img_types)
     survey = exp[exp.survey].sort_values("obs_start_mjd")
     other = exp[~exp.survey].sort_values("obs_start_mjd")
-    eng = other[~other.startup]
-    start = other[other.startup]
-
+    eng = other[~other.alignment]
+    align = other[other.alignment]
     gap_allowed, gap_rows = [], []
     other_starts = other.obs_start_mjd.values
     for day_obs, night in survey.groupby("day_obs"):
@@ -1276,7 +1718,7 @@ def survey_sequence(exposures, rules):
                 continue
             k = np.searchsorted(other_starts, g0, side="left")
             if k < len(other_starts) and other_starts[k] < g1:
-                continue  # a non-survey exposure inside the gap: the survey sequence was interrupted
+                continue
             allowance_s = (
                 (model[i] + rules.gap_scatter_s)
                 if np.isfinite(model[i])
@@ -1305,7 +1747,7 @@ def survey_sequence(exposures, rules):
         ),
         "a2_gap": Intervals.from_pairs(gap_allowed),
         "activity": _runs(eng.obs_start_mjd.values, eng.obs_end_mjd.values, join),
-        "startup": _runs(start.obs_start_mjd.values, start.obs_end_mjd.values, join),
+        "alignment": _runs(align.obs_start_mjd.values, align.obs_end_mjd.values, join),
         "first_science": a1.groupby("day_obs").obs_start_mjd.min(),
         "gaps": pd.DataFrame(
             gap_rows,
@@ -1361,41 +1803,6 @@ def split_gap_excess(gaps, intervals, activity, cap_s):
     return Intervals.from_pairs(d3), Intervals.from_pairs(e)
 
 
-def dome_releases(env, windows, rules):
-    """Per night, the dome-release times (TAI MJD): each opening after the dome had been closed for at least
-    `release_min_closed_min` (an opening before evening twilight releases the night at twilight).
-    """
-    out = {}
-    if len(env) == 0:
-        return out
-    t = env.t.values
-    with np.errstate(invalid="ignore"):
-        open_ = env.shutter.values > rules.dome_open_pct
-    known = np.isfinite(env.shutter.values)
-    for day_obs, w in windows.iterrows():
-        sel = (t >= w.start - 0.5) & (t < w.end) & known
-        if not sel.any():
-            continue
-        releases, closed_since, open_at_start = [], None, False
-        for ti, oi in zip(t[sel], open_[sel]):
-            if ti <= w.start < ti + MINUTE:
-                open_at_start = bool(oi)
-            if not oi:
-                closed_since = ti if closed_since is None else closed_since
-                continue
-            if (
-                closed_since is not None
-                and (ti - closed_since) * 1440 >= rules.release_min_closed_min
-            ):
-                releases.append(max(ti, w.start))
-            closed_since = None
-        releases = sorted({r for r in releases if r < w.end})
-        if open_at_start and (not releases or releases[0] > w.start):
-            releases.insert(0, w.start)
-        out[day_obs] = releases
-    return out
-
-
 # ---------------------------------------------------------------------------------------------------------------
 # The ledger
 # ---------------------------------------------------------------------------------------------------------------
@@ -1406,17 +1813,12 @@ def build_ledger(
 ):
     """Assign every part of every observable night to one category.
 
-    `overrides` is the prepared override table (read_overrides / prepare_overrides); `wxm` the per-minute weather
-    evidence (weather_minutes). Returns a segment table: one row per elementary segment with day_obs, start, end,
-    hours, category, detail, the evidence used, and the fault attribution.
+    `overrides` is the prepared override table; `cam` the allskycam frames with a `cloudy` flag (cloud_flags);
+    `wxm` the per-minute Weather Constraints evidence (weather_minutes). Returns a segment table: one row per
+    elementary segment with day_obs, start, end, hours, category, detail, the evidence used, and the fault group.
     """
     gaps = seq["gaps"]
     d3_iv, e_gap_iv = split_gap_excess(gaps, intervals, seq["activity"], d3_cap_s)
-    releases = (
-        dome_releases(env, windows, rules)
-        if rules.startup_origin == "dome_release"
-        else {}
-    )
 
     # 1. Elementary segments: every evidence boundary inside a night.
     edges = [
@@ -1425,7 +1827,7 @@ def build_ledger(
         intervals.start.values,
         intervals.end.values,
     ]
-    for key in ("a1", "a2_exp", "a2_gap", "activity", "startup"):
+    for key in ("a1", "a2_exp", "a2_gap", "activity", "alignment"):
         edges.append(seq[key].edges())
     edges += [d3_iv.edges(), e_gap_iv.edges()]
     if len(env):
@@ -1439,8 +1841,6 @@ def build_ledger(
         windows.start.values + allowance,
         seq["first_science"].values.astype(float),
     ]
-    for rel in releases.values():
-        edges += [np.array(rel), np.array(rel) + allowance]
     b = np.unique(np.concatenate([np.asarray(e, dtype=float) for e in edges]))
     lo_all, hi_all = windows.start.values, windows.end.values
     b = b[(b >= lo_all.min()) & (b <= hi_all.max())]
@@ -1485,23 +1885,32 @@ def build_ledger(
     st_U = fresh & (status == 0)
     st_day_only = fresh & (status == STATUS_BITS["DAYTIME"])
 
-    if len(env):
-        shutter = _lookup_bins(env.t.values, MINUTE, env.shutter.values, mid)
-    else:
-        shutter = np.full(n, np.nan)
+    shutter = (
+        _lookup_bins(env.t.values, MINUTE, env.shutter.values, mid)
+        if len(env)
+        else np.full(n, np.nan)
+    )
     dome_known = np.isfinite(shutter)
     with np.errstate(invalid="ignore"):
         dome_open = dome_known & (shutter > rules.dome_open_pct)
     dome_closed = dome_known & ~dome_open
     if cam is not None and len(cam):
-        cloud = _lookup_bins(
-            cam.t.values - 0.5 * MINUTE, MINUTE, cam.cloud_idx.values, mid
+        cloud_v = _lookup_bins(
+            cam.t.values - 0.5 * MINUTE, MINUTE, cam.cloud_value.values, mid
+        )
+        cloudy = (
+            _lookup_bins(
+                cam.t.values - 0.5 * MINUTE,
+                MINUTE,
+                cam.cloudy.values.astype(float),
+                mid,
+            )
+            == 1
         )
     else:
-        cloud = np.full(n, np.nan)
-    cam_known = np.isfinite(cloud)
-    with np.errstate(invalid="ignore"):
-        cloudy = cam_known & (cloud > rules.cloud_index_max)
+        cloud_v = np.full(n, np.nan)
+        cloudy = np.zeros(n, dtype=bool)
+    cam_known = np.isfinite(cloud_v)
     if len(wxm):
         wt = wxm.t.values.astype(float)
         wx_known = _lookup_bins(wt, MINUTE, wxm.known.values.astype(float), mid) == 1
@@ -1509,13 +1918,14 @@ def build_ledger(
             _lookup_bins(wt, MINUTE, wxm.bad.values.astype(float), mid) == 1
         ) & wx_known
         standby = _lookup_bins(wt, MINUTE, wxm.standby.values.astype(float), mid) == 1
-        reason_idx = np.searchsorted(wt, mid, side="right") - 1
-        standby_reason = np.where(
-            standby, wxm.reason.values[np.clip(reason_idx, 0, None)], ""
-        )
+        k = np.clip(np.searchsorted(wt, mid, side="right") - 1, 0, None)
+        standby_reason = np.where(standby, wxm.reason.values[k], "")
+        provisional = standby & wxm.provisional.values[k].astype(bool)
+        regime = np.where(wx_known, wxm.regime.values[k], "")
+        close_reason = np.where(wx_bad, wxm.close_reason.values[k], "")
     else:
-        wx_known = wx_bad = standby = np.zeros(n, dtype=bool)
-        standby_reason = np.full(n, "", dtype=object)
+        wx_known = wx_bad = standby = provisional = np.zeros(n, dtype=bool)
+        standby_reason = regime = close_reason = np.full(n, "", dtype=object)
     wx_bad = wx_bad | cloudy
     weather_data = wx_known | cam_known
 
@@ -1524,7 +1934,8 @@ def build_ledger(
     d3 = d3_iv.contains(mid)
     e_gap = e_gap_iv.contains(mid)
     activity = seq["activity"].contains(mid)
-    startup_run = seq["startup"].contains(mid)
+    alignment_run = seq["alignment"].index_of(mid)
+    alignment = alignment_run >= 0
     survey_active = a1 | a2
     available = ~(st_F | st_D)
 
@@ -1546,7 +1957,7 @@ def build_ledger(
     applies["D1"] = st_F
     applies["D4_state"] = st_D
     applies["D4_closed"] = (
-        dome_closed & good & ~activity & ~startup_run & ~survey_active & ~on_override
+        dome_closed & good & ~activity & ~alignment & ~survey_active & ~on_override
     )
     applies["D3"] = d3
     applies["E"] = (((st_I | st_O) & ~survey_active) | e_gap) & ~on_override
@@ -1558,7 +1969,7 @@ def build_ledger(
         (applies["B1"], "B1", "override B1"),
         (applies["C_override"], ov_cat, "override"),
         (applies["C1"], "C1", ""),
-        (applies["C2"], "C2", "allskycam index"),
+        (applies["C2"], "C2", "allskycam"),
         (applies["C3"], "C3", ""),
         (applies["B2a_override"], "B2a", "override B2a"),
         (applies["B2a"], "B2a", ""),
@@ -1582,11 +1993,16 @@ def build_ledger(
         detail[take] = why
         done |= take
     c_ev = np.where(st_W, "WEATHER state", "")
-    c_ev = np.where(~st_W & wx_bad, "measured (tower / allskycam / rain)", c_ev)
+    measured = np.where(close_reason != "", close_reason, "thick cloud (allskycam)")
+    c_ev = np.where(
+        ~st_W & wx_bad,
+        np.char.add("measured: ", measured.astype(str)).astype(object),
+        c_ev,
+    )
     c_ev = np.where((c_ev == "") & standby, standby_reason, c_ev)
     sel = np.isin(category, ["C1", "C3"]) & (detail == "")
     detail[sel] = [
-        f"measured, inside override {o}" if on else e
+        f"{e or 'measured'} (inside override {o})" if on else e
         for o, on, e in zip(ov_cat[sel], on_override[sel], c_ev[sel])
     ]
     detail[(category == "E") & e_gap] = "visit gap beyond the D3 cap"
@@ -1609,19 +2025,22 @@ def build_ledger(
             "dome_open": np.where(dome_known, dome_open, np.nan),
             "wx_bad": np.where(wx_known | cam_known, wx_bad, np.nan),
             "cloudy": np.where(cam_known, cloudy, np.nan),
+            "cloud_value": cloud_v,
             "standby": standby,
+            "provisional": provisional & (category == "C3"),
+            "regime": regime,
             "survey_active": survey_active,
             "a1_evidence": a1,
             "activity": activity,
-            "startup_run": startup_run,
+            "alignment_run": alignment_run,
             "on_override": on_override,
             "override_category": ov_cat,
             "override_group": ov_group,
         }
     )
 
-    # 6. Start-up (A3 / overrun / before release) and whole-night faults (D2).
-    seg = _apply_startup(seg, windows, seq["first_science"], releases, rules)
+    # 6. Start-up (A3 / overrun) and whole-night faults (D2).
+    seg = _apply_startup(seg, windows, seq["first_science"], rules)
     seg = _apply_d2(seg, rules)
 
     # 7. Shadow evidence (kept for statistics, never added to the totals).
@@ -1633,83 +2052,147 @@ def build_ledger(
     for key, val in applies.items():
         seg[f"applies_{key}"] = val
 
-    # 8. Fault attribution.
-    seg = _attribute_faults(seg, intervals, runs, rules)
+    # 8. Fault attribution, then recovery alignments (which take the group of the interruption they follow).
+    seg = _attribute_faults(seg, intervals, runs)
+    seg = _apply_alignment_recovery(seg, rules)
+    seg["provisional"] = seg.provisional & (seg.category == "C3")
     seg.attrs["d3_cap_s"] = d3_cap_s
-    seg.attrs["releases"] = releases
     return seg
 
 
-def _apply_startup(seg, windows, first_science, releases, rules):
-    """Start-up: T539 runs and the E / F time before the first survey science visit.
+def _apply_startup(seg, windows, first_science, rules):
+    """Start-up from -12 deg evening twilight.
 
-    Allowance windows start at evening twilight ("twilight") or at each dome release ("dome_release"). Inside an
-    allowance window, T539 time and (before the night's first survey science visit) E / F time is A3. T539 time
-    outside every allowance window, and the E / F stretch after the allowance up to the first survey visit
-    (stopping at any other category), is the start-up overrun (D1). With "dome_release", the E / F / closed-dome
-    D4 time from twilight to the first release is D4 "before dome release" (ROSP-58 Q6 amendment).
+    The start-up alignment is the night's first T539 run if it begins before the first survey science visit with
+    no weather (C) or fault (D1 / D2) time between -12 deg and its start; every other T539 run is a recovery
+    alignment (_apply_alignment_recovery). Inside the 10-min allowance, start-up alignment time and (before the
+    first survey visit) idle E / F time is A3. Start-up alignment time beyond the allowance, and the idle stretch
+    from the end of the allowance to the first survey visit (stopping at any other category), is the start-up
+    overrun: D1, or D4 with the declaration's group where a delay was declared before the first survey visit (a
+    DOWNTIME state or an override D4 row, which keep their own time).
     """
     allowance = rules.startup_allowance_min / 1440.0
     seg = seg.copy()
     cat = seg.category.values.copy()
     det = seg.detail.values.copy()
+    run = seg.alignment_run.values
+    on_ov = seg.on_override.values
     mids = 0.5 * (seg.start.values + seg.end.values)
-    is_startup = seg.startup_run.values & ~seg.on_override.values
-    free = np.isin(cat, ["E", "F"]) & ~seg.on_override.values
-    by_night = {
-        d: np.where(seg.day_obs.values == d)[0] for d in np.unique(seg.day_obs.values)
-    }
-    for day_obs, idx in by_night.items():
+    role = np.full(len(seg), "", dtype=object)
+    group = np.full(len(seg), "", dtype=object)
+    for day_obs in np.unique(seg.day_obs.values):
+        idx = np.where(seg.day_obs.values == day_obs)[0]
         w = windows.loc[day_obs]
-        if rules.startup_origin == "dome_release":
-            origins = list(releases.get(day_obs) or [w.start])  # no dome data: twilight
-        else:
-            origins = [w.start]
         m = mids[idx]
-        in_allow = np.zeros(len(idx), dtype=bool)
-        for o in origins:
-            in_allow |= (m >= o) & (m < o + allowance)
         t_first = first_science.get(day_obs, np.nan)
-        has_first = np.isfinite(t_first) and w.start <= t_first < w.end
-        first_origin = origins[0] if origins else np.inf
-        if rules.startup_origin == "dome_release" and origins:
-            before = (m < first_origin) & (
-                np.isin(cat[idx], ["E", "F"])
-                | (
-                    (cat[idx] == "D4")
-                    & (det[idx] == "closed dome, good conditions, nothing running")
-                )
-            )
-            before &= ~seg.on_override.values[idx]
-            cat[idx[before]] = "D4"
-            det[idx[before]] = "before dome release (start-up delay)"
-        # A3: T539 inside an allowance window; E/F inside the first window, before the first survey visit.
-        a3 = (is_startup[idx] & in_allow & np.isin(cat[idx], ["E", "F"])) | (
-            free[idx]
-            & in_allow
-            & (m >= first_origin)
-            & (m < (t_first if has_first else -np.inf))
+        has_first = bool(np.isfinite(t_first) and w.start <= t_first < w.end)
+        startup_run = -1
+        runs_here = [r for r in dict.fromkeys(run[idx]) if r >= 0]
+        if runs_here:
+            first_run = runs_here[0]
+            r_start = seg.start.values[idx[run[idx] == first_run]].min()
+            before = idx[m < r_start]
+            interrupted = any(c[0] == "C" or c in ("D1", "D2") for c in cat[before])
+            if (not has_first or r_start < t_first) and not interrupted:
+                startup_run = first_run
+        # A declared delay (DOWNTIME state or an override D4 row) before the first survey visit makes the overrun D4.
+        horizon = t_first if has_first else w.end
+        declared = idx[
+            (m < horizon)
+            & (cat[idx] == "D4")
+            & np.isin(det[idx], ["override", "DOWNTIME state"])
+        ]
+        overrun_cat = "D4" if len(declared) else rules.startup_overrun_category
+        overrun_group = (
+            next((g for g in seg.override_group.values[declared] if g), "")
+            if len(declared)
+            else ""
+        )
+        is_start = (run[idx] == startup_run) & (startup_run >= 0) & ~on_ov[idx]
+        role[idx[is_start]] = "start-up"
+        role[idx[(run[idx] >= 0) & ~is_start]] = "recovery"
+        in_allow = (m >= w.start) & (m < w.start + allowance)
+        free = np.isin(cat[idx], ["E", "F"]) & ~on_ov[idx]
+        a3 = (is_start & in_allow & np.isin(cat[idx], ["E", "F"])) | (
+            free & (run[idx] < 0) & in_allow & has_first & (m < t_first)
         )
         cat[idx[a3]] = "A3"
         det[idx[a3]] = "start-up allowance"
-        # Overrun: T539 outside the allowance windows.
-        t539_over = is_startup[idx] & ~in_allow & np.isin(cat[idx], ["E", "F"])
-        cat[idx[t539_over]] = rules.startup_overrun_category
-        det[idx[t539_over]] = "start-up overrun (T539)"
-        # Overrun: the E/F stretch from the end of the first allowance to the first survey visit.
-        if has_first and np.isfinite(first_origin):
-            over = np.where((m >= first_origin + allowance) & (m < t_first))[0]
-            for j in over:
+        over_align = is_start & ~in_allow & np.isin(cat[idx], ["E", "F"])
+        cat[idx[over_align]] = overrun_cat
+        det[idx[over_align]] = "start-up overrun (T539)"
+        group[idx[over_align]] = overrun_group
+        if has_first:
+            declared_set = set(declared.tolist())
+            for j in np.where((m >= w.start + allowance) & (m < t_first))[0]:
                 i = idx[j]
-                if cat[i] in ("E", "F") and not seg.on_override.values[i]:
-                    cat[i] = rules.startup_overrun_category
-                    det[i] = "start-up overrun"
-                elif det[i] == "start-up overrun (T539)":
+                if role[i] == "start-up" or i in declared_set:
                     continue
+                if cat[i] in ("E", "F") and not on_ov[i] and run[i] < 0:
+                    cat[i] = overrun_cat
+                    det[i] = "start-up overrun"
+                    group[i] = overrun_group
                 else:
                     break
     seg["category"] = cat
     seg["detail"] = det
+    seg["alignment_role"] = role
+    seg["startup_group"] = group
+    return seg
+
+
+def _apply_alignment_recovery(seg, rules):
+    """Recovery alignments (T539 runs that are not the start-up): charged with the interruption they follow.
+
+    Looking back from the run's start over the same night, past idle (E / F) time and other alignment time, the
+    first other segment decides: a fault (D1 / D2) -> the same category and group; unplanned downtime (D4) -> D4,
+    same group; weather (C) -> `t539_after_weather` (C3 by default, D1 the alternative); engineering (B) or survey
+    (A, D3) -> E (no interruption). T539 is never B2a. Only E / F alignment time is re-categorised.
+    """
+    seg = seg.copy()
+    cat, det, grp = (
+        seg.category.values.copy(),
+        seg.detail.values.copy(),
+        seg.fault_group.values.copy(),
+    )
+    role, run = seg.alignment_role.values, seg.alignment_run.values
+    follows = np.full(len(seg), "", dtype=object)
+    for day_obs in np.unique(seg.day_obs.values[role == "recovery"]):
+        idx = np.where(seg.day_obs.values == day_obs)[0]
+        for r in dict.fromkeys(run[idx][role[idx] == "recovery"]):
+            r_idx = idx[run[idx] == r]
+            first = r_idx.min()
+            kind, src = "none", None
+            for i in range(first - 1, idx.min() - 1, -1):
+                if run[i] >= 0 or cat[i] in ("E", "F"):
+                    continue
+                c = cat[i]
+                if c in ("D1", "D2"):
+                    kind, src = "fault", i
+                elif c == "D4":
+                    kind, src = "downtime", i
+                elif c.startswith("C"):
+                    kind, src = "weather", i
+                elif c.startswith("B"):
+                    kind = "engineering"
+                else:
+                    kind = "none"
+                break
+            take = r_idx[np.isin(cat[r_idx], ["E", "F"])]
+            follows[r_idx] = kind
+            if kind in ("fault", "downtime"):
+                cat[take], grp[take] = cat[src], grp[src]
+                det[take] = f"T539 recovery after {kind}"
+            elif kind == "weather":
+                cat[take] = rules.t539_after_weather
+                det[take] = "T539 recovery after weather"
+                if rules.t539_after_weather.startswith("D"):
+                    grp[take] = PENDING
+            else:
+                cat[take] = "E"
+                det[take] = f"T539 recovery, no interruption before it ({kind})"
+    seg["category"], seg["detail"], seg["fault_group"] = cat, det, grp
+    seg["alignment_follows"] = follows
     return seg
 
 
@@ -1745,13 +2228,13 @@ def _apply_d2(seg, rules):
     return seg
 
 
-def _attribute_faults(seg, intervals, runs, rules):
+def _attribute_faults(seg, intervals, runs):
     """Fault group of D1 / D2 / D4 segments.
 
-    FAULT-state D1/D2: the primary CSC's group, or "F (unattributed)" for a hand-set FAULT with no CSC
-    (`suggested_group` keeps the look-back). D2 without a run of its own: the night's largest run. Override D
-    rows: the row's `group` (pending if empty). D4 closed dome with nothing running: Operations decision. Other D4,
-    the start-up overrun and the pre-release delay: pending (the cause is not in the data). D3: not attributed.
+    FAULT-state D1/D2: the run's group (assign_primary_csc: primary CSC, CSC summary state, narrative log, or
+    Operations decision for a hand-set FAULT with no cause recorded). D2 without a run of its own: the night's
+    largest run. Override D rows: the row's `group` (pending if empty). D4 closed dome with nothing running:
+    Operations decision. Other D4 and the start-up overrun: pending. D3: not attributed.
     """
     seg = seg.copy()
     run_of_interval = {}
@@ -1765,26 +2248,31 @@ def _attribute_faults(seg, intervals, runs, rules):
     rg = (
         runs.set_index("fault_run")
         if len(runs)
-        else pd.DataFrame(columns=["group", "primary_csc", "suggested_group"])
+        else pd.DataFrame(
+            columns=["group", "primary_csc", "suggested_group", "primary_rule"]
+        )
     )
-    run_group, run_csc, run_sugg = (
+    run_group, run_csc, run_sugg, run_rule = (
         rg.group.to_dict(),
         rg.primary_csc.to_dict(),
         rg.suggested_group.to_dict(),
+        rg.primary_rule.to_dict(),
     )
     n = len(seg)
     group = np.full(n, "", dtype=object)
     csc = np.full(n, "", dtype=object)
     sugg = np.full(n, "", dtype=object)
+    rule = np.full(n, "", dtype=object)
     cat, det = seg.category.values, seg.detail.values
     fr = seg.fault_run.values
     state_fault = np.isin(cat, ["D1", "D2"]) & np.isfinite(fr)
     for i in np.where(state_fault)[0]:
         r = int(fr[i])
-        group[i], csc[i], sugg[i] = (
+        group[i], csc[i], sugg[i], rule[i] = (
             run_group.get(r, PENDING),
             run_csc.get(r) or "",
             run_sugg.get(r, ""),
+            run_rule.get(r, ""),
         )
     d2 = cat == "D2"
     if d2.any():
@@ -1801,10 +2289,11 @@ def _attribute_faults(seg, intervals, runs, rules):
             d = seg.day_obs.values[i]
             if d in big.index:
                 r = int(big.loc[d, "fault_run"])
-                group[i], csc[i], sugg[i] = (
+                group[i], csc[i], sugg[i], rule[i] = (
                     run_group.get(r, PENDING),
                     run_csc.get(r) or "",
                     run_sugg.get(r, ""),
+                    run_rule.get(r, ""),
                 )
     ov_d = (det == "override") & np.isin(cat, ["D1", "D2", "D4"])
     group[ov_d] = np.where(
@@ -1815,18 +2304,17 @@ def _attribute_faults(seg, intervals, runs, rules):
         seg.override_group.values[c5d4] != "", seg.override_group.values[c5d4], PENDING
     )
     group[(cat == "D4") & (det == "closed dome, good conditions, nothing running")] = (
-        "Operations decision"
+        OPERATIONS_DECISION
     )
+    su = np.char.startswith(det.astype(str), "start-up overrun") & (
+        seg.startup_group.values != ""
+    )
+    group[su] = seg.startup_group.values[su]
     group[np.isin(cat, ["D1", "D2", "D4"]) & (group == "")] = PENDING
     seg["fault_group"] = group
     seg["fault_csc"] = csc
     seg["suggested_group"] = sugg
-    if rules.no_csc_fault_category == "F":
-        move = np.isin(cat, ["D1", "D2"]) & (group == UNATTRIBUTED_FAULT)
-        seg.loc[move, "detail"] = (
-            "hand-set FAULT, no CSC (was " + seg.loc[move, "category"] + ")"
-        )
-        seg.loc[move, "category"] = "F"
+    seg["fault_rule"] = rule
     return seg
 
 
@@ -1994,6 +2482,33 @@ def shadow_by_night(seg):
     return out[(out > 0.005).any(axis=1)]
 
 
+def c3_by_regime(seg):
+    """C3 weather-standby hours by Weather Constraints regime and reason (provisional rows flagged)."""
+    c3 = seg[seg.category == "C3"].copy()
+    if len(c3) == 0:
+        return pd.DataFrame(columns=["hours", "nights"])
+    c3["regime"] = c3.regime.replace("", "(no weather data)")
+    c3["reason"] = np.where(c3.detail == "", "other", c3.detail)
+    return c3.groupby(["regime", "reason"]).agg(
+        hours=("hours", "sum"), nights=("day_obs", "nunique")
+    )
+
+
+def alignment_table(seg):
+    """T539 hours by role (start-up / recovery), what a recovery follows, and the category it went to."""
+    a = seg[seg.alignment_run >= 0]
+    if len(a) == 0:
+        return pd.DataFrame(columns=["hours", "runs", "nights"])
+    a = a.assign(
+        follows=np.where(a.alignment_role == "start-up", "-", a.alignment_follows)
+    )
+    return a.groupby(["alignment_role", "follows", "category"]).agg(
+        hours=("hours", "sum"),
+        runs=("alignment_run", "nunique"),
+        nights=("day_obs", "nunique"),
+    )
+
+
 def precedence_checks(seg):
     """Where the precedence moved time away from what the observing record shows; for review, not the ledger."""
     rows = []
@@ -2042,11 +2557,15 @@ def precedence_checks(seg):
         by="day_obs",
     )
     add(
-        "T539 start-up outside the allowance (D1 overrun)",
-        seg.detail == "start-up overrun (T539)",
+        "Start-up overrun (D1)",
+        seg.detail.str.startswith("start-up overrun"),
         by="day_obs",
     )
-    add("C3 weather standby", seg.category == "C3", by="detail")
+    add(
+        "C3 weather standby, provisional (post-precipitation proposal)",
+        seg.provisional,
+        by="detail",
+    )
     add(
         "No dome telemetry, treated as closed for C1",
         seg.applies_C1
@@ -2123,7 +2642,6 @@ def ledger_with_corrections(inputs, corrections):
     Each correction is a dict with an `id` and a `kind`: "window" (an override row for [start, end) with a
     category and group, as the ROSP-58 rows would be), "override_group" (fill the `group` of override rows of
     `category` that have none), or "fault_group" (re-attribute a night's FAULT-state D1/D2 hours to `group`).
-    `inputs` holds the build_ledger arguments by name.
     """
     ov = _raw_overrides(inputs["overrides"])
     for c in corrections:
@@ -2179,7 +2697,7 @@ def what_if_table(inputs, base, corrections):
             )
             continue
         seg = ledger_with_corrections(inputs, [c])
-        by_cat, by_group = ledger_delta(base, seg)
+        _, by_group = ledger_delta(base, seg)
         moves = ", ".join(f"{k} {v:+.2f} h" for k, v in by_group.sort_values().items())
         rows.append(
             {
@@ -2209,11 +2727,13 @@ def what_if_table(inputs, base, corrections):
 
 
 def sensitivity(inputs, variants, windows):
-    """Category hours for rule variants: variants = {label: (rules, d3_cap_s)}."""
+    """Category hours for rule variants: variants = {label: (rules, d3_cap_s)} or {label: (rules, d3_cap_s, cam, wxm)}."""
     out = {}
-    for label, (rules, cap) in variants.items():
+    for label, v in variants.items():
         args = dict(inputs)
-        args["rules"], args["d3_cap_s"] = rules, cap
+        args["rules"], args["d3_cap_s"] = v[0], v[1]
+        if len(v) > 2:
+            args["cam"], args["wxm"] = v[2], v[3]
         out[label] = per_night_table(build_ledger(**args), windows)[
             CATEGORY_ORDER
         ].sum()

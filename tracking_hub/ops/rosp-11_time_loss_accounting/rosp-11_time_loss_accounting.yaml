@@ -4,9 +4,11 @@ description: >
   assigned to one ROSP-24 category (A science, B scheduled, C weather, D fault, E idle, F unattributed) by the
   precedence B1 -> C -> B2 -> D (D2, D1, D4, D3) -> E -> A -> F, from the EFD observatory states (applied first,
   never edited), the shared observatory_state_overrides.csv read from main and pinned to its commit SHA, ConsDB
-  visits with the rubin_scheduler slew model, the weather tower, the dome shutter and, where available, the
-  allskycam, with the rule updates of 2026-11-16/17 (B2 only while available, T539 as start-up, measured
-  weather inside override D4, C3 weather standby by Weather Constraints version, D3 cap, FAULT with no CSC to F).
+  visits with the rubin_scheduler slew model, the weather tower, the dome shutter, the
+  inside dew-point sensors and, where available, the deep allskycam index, with the rule updates of 2026-11-16/17
+  and round 3 (B2 only while available; BLOCK-T539 by context, start-up or recovery; A3 from -12 deg; measured
+  weather inside override D4; C3 weather standby by Weather Constraints regime R1-R4; D3 cap; a hand-set FAULT
+  takes its group from the narrative log, else Operations decision).
   Reports the per-night ledger, cycle fractions by category with the short losses (D1 + E), fault loss by
   subsystem group, the shadow record (never added to the totals), the sensitivity to the rules still pending, and
   the pending attribution corrections as a what-if (not applied).
