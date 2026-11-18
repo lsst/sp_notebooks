@@ -33,10 +33,10 @@ from astropy.time import Time, TimeDelta
 
 # Bumped whenever a function signature or a returned column changes, so the notebook can refuse a module
 # that does not match it (on Times Square the module is fetched from GitHub, not read from the checkout).
-MODULE_API_VERSION = 4
+MODULE_API_VERSION = 5
 
 TAXONOMY_VERSION = (
-    "v1.0 (pending ROSP-24 sign-off; rule updates of 2026-11-16/17, rounds 3-4)"
+    "v1.0 (pending ROSP-24 sign-off; rule updates of 2026-11-16/17, rounds 3-5)"
 )
 
 GITHUB_REPO = "lsst/sp_notebooks"
@@ -274,7 +274,7 @@ WIND_REGIMES = (
 POST_PRECIP = {
     "rain_hold_min": 60,  # rain with T > 0 C: 30 min dry + dome drain
     "humid_rh": 75.0,  # RH above this (or fog) with T > 0 C ...
-    "humid_hold_min": 20,  # ... 20 min safe + walk-around
+    "humid_hold_min": 20,  # ... 20 min with humidity safe, then the walk-around (measured; not log-gated)
     "icing_temp_c": 0.0,  # T <= this while structures are still wet: C3 to the end of the night
     "wet_memory_min": 120,  # how long structures count as wet after rain or a humid period
 }
@@ -328,11 +328,12 @@ class Rules:
     weather_regimes: tuple = WEATHER_REGIMES
     wind_regimes: tuple = WIND_REGIMES
     post_precip: tuple = tuple(POST_PRECIP.items())
-    # The post-precipitation holds and icing stand only with log evidence (night report or narrative log) of
+    # The post-precipitation hold and icing (not the humidity / fog hold) stand only with log evidence (night report or narrative log) of
     # precipitation, ice, snow, frost or wet structures in, or this long before, the hold (ROSP-58, round 4).
     precip_log_gate: bool = True
     precip_log_margin_h: float = 3.0
-    # R1-R2 "do not open above RH 70 %" applies whenever the dome is closed, not only before the first opening.
+    # R1-R2 "do not open above RH 70 %" applies whenever the dome is closed: that time is C1 (a humidity closing
+    # limit) and the re-opening wait after it clears is C3 (rounds 4-5).
     do_not_open_any_closure: bool = True
     # Cloud: the deep allskycam index (ext_deep, mag). "Unusable" (C1 closed / C2 open) and R1-R3 "heavy and
     # dark" = the thick class, ext_deep above this. The standard index (> 0.5) is the fallback.
@@ -349,8 +350,6 @@ class Rules:
     fault_onset_lookback_h: float = 24.0
     # Narrative-log window for a hand-set FAULT: from this long before the FAULT episode began to the run's end.
     narrative_margin_min: float = 30.0
-    # ROSP-12 fault episodes: FAULT stretches of the same group less than this apart are one episode (round 4).
-    episode_join_min: float = 15.0
 
     def regime(self, day_obs):
         rows = sorted(self.weather_regimes, key=lambda r: r["from_dayobs"])
@@ -431,7 +430,7 @@ RULE_NOTES = {
     ),
     "precip_log_gate": (
         "decided",
-        "holds and icing need log evidence (round 4, 2026-11-17)",
+        "post-precipitation hold and icing need log evidence (round 4); the humidity / fog hold does not (round 5)",
     ),
     "precip_log_margin_h": (
         "parameter",
@@ -439,7 +438,7 @@ RULE_NOTES = {
     ),
     "do_not_open_any_closure": (
         "decided",
-        "Weather Constraints R1-R2 do-not-open RH > 70 %",
+        "R1-R2 do-not-open RH > 70 % whenever the dome is closed: C1, then the re-opening wait (C3) (round 5)",
     ),
     "cloud_source": (
         "decided",
@@ -476,10 +475,6 @@ RULE_NOTES = {
     "narrative_margin_min": (
         "parameter",
         "narrative-log window before a hand-set FAULT episode",
-    ),
-    "episode_join_min": (
-        "parameter",
-        "ROSP-12 episodes: same-group FAULT stretches closer than this are one",
     ),
 }
 
@@ -1548,16 +1543,12 @@ def _standby_pass(
                     if t[i] < last_morning
                     else "within 1 h of morning -12 deg"
                 )
-        elif (
-            rules.do_not_open_any_closure
-            and R["rh_do_not_open"] is not None
-            and rh[i] > R["rh_do_not_open"]
-        ):
-            why = f"do-not-open: RH > {R['rh_do_not_open']:g} % ({R['regime']})"
         if not why and t[i] < rain_hold and hold_ok[i]:
             why, provisional = "post-precipitation hold (provisional)", True
-        if not why and t[i] < humid_hold and hold_ok[i]:
-            why, provisional = "post-humidity hold (provisional)", True
+        # The humidity / fog hold rests on measured humidity and is not log-gated; where it overlaps the regime's own
+        # re-opening wait, the minute is already the wait's, so the longer of the two is counted once.
+        if not why and t[i] < humid_hold:
+            why, provisional = "humidity / fog hold (provisional)", True
         if why:
             standby[i], reason[i], prov[i] = True, why, provisional
     return standby, reason, prov
@@ -1584,6 +1575,7 @@ def weather_minutes(env, cam, rain, windows, rules, logs=None):
         "known",
         "close",
         "close_nc",
+        "rh_block",
         "bad",
         "close_reason",
         "standby",
@@ -1672,9 +1664,24 @@ def weather_minutes(env, cam, rain, windows, rules, logs=None):
             cloudy = np.zeros(len(t), dtype=bool)
             cloud_known = np.zeros(len(t), dtype=bool)
         close = close_nc | (cloudy if R["cloud_closes"] else none)
-        bad = close | cloudy
+        # R1-R2 "do not open above RH 70 %": with the dome closed, humidity above the limit is a C1 closing limit,
+        # whatever closed the dome, and the re-opening wait runs from when it clears (round 5).
+        rh_block = none
+        if rules.do_not_open_any_closure and R["rh_do_not_open"] is not None:
+            with np.errstate(invalid="ignore"):
+                rh_block = rh > R["rh_do_not_open"]
+        bad = close | cloudy | rh_block
         close_reason = np.select(
-            [wet, wind_close, m_spread, m_sustained, m_inside, m_glass, cloudy],
+            [
+                wet,
+                wind_close,
+                m_spread,
+                m_sustained,
+                m_inside,
+                m_glass,
+                rh_block,
+                cloudy,
+            ],
             [
                 "rain",
                 "wind",
@@ -1682,6 +1689,7 @@ def weather_minutes(env, cam, rain, windows, rules, logs=None):
                 "tower spread, sustained",
                 "inside sensor near dew point",
                 "M1M3 glass near dew point",
+                f"RH above the do-not-open {R['rh_do_not_open']} % ({R['regime']})",
                 "thick cloud (allskycam)",
             ],
             "",
@@ -1703,7 +1711,7 @@ def weather_minutes(env, cam, rain, windows, rules, logs=None):
             R,
             W,
             rules,
-            close,
+            close | rh_block,
             wind_close,
             wet,
             dome_open,
@@ -1728,7 +1736,9 @@ def weather_minutes(env, cam, rain, windows, rules, logs=None):
         for g in np.unique(run_id[kind != ""]):
             idx = np.flatnonzero(run_id == g)
             t0, t1 = t[idx[0]], t[idx[-1]] + MINUTE
-            if rules.precip_log_gate:
+            if kind[idx[0]].startswith("humidity"):
+                backed, source, quote = True, "measured humidity (not gated)", ""
+            elif rules.precip_log_gate:
                 backed, source, quote = precip_log_evidence(
                     logs, day_obs, t0, t1, rules.precip_log_margin_h
                 )
@@ -1766,6 +1776,7 @@ def weather_minutes(env, cam, rain, windows, rules, logs=None):
                     "known": known[night],
                     "close": close[night],
                     "close_nc": close_nc[night],
+                    "rh_block": rh_block[night],
                     "bad": bad[night],
                     "close_reason": close_reason[night],
                     "standby": standby[night] & known[night],
@@ -2120,8 +2131,13 @@ def build_ledger(
         wx_close = (
             _lookup_bins(wt, MINUTE, wxm.close_nc.values.astype(float), mid) == 1
         ) & wx_known
+        wx_rh = (
+            _lookup_bins(wt, MINUTE, wxm.rh_block.values.astype(float), mid) == 1
+        ) & wx_known
     else:
-        wx_known = wx_bad = wx_close = standby = provisional = np.zeros(n, dtype=bool)
+        wx_known = wx_bad = wx_close = wx_rh = standby = provisional = np.zeros(
+            n, dtype=bool
+        )
         standby_reason = regime = close_reason = np.full(n, "", dtype=object)
     wx_bad = wx_bad | cloudy
     # Thick cloud is a closing criterion (C1) only where the regime in force has one (R1-R3, "heavy and dark");
@@ -2151,7 +2167,9 @@ def build_ledger(
         (ov_cat == "C5") & ~weather_data
     )
     applies["C1"] = (
-        ~survey_active & ~dome_open & (st_W | wx_close | (cloudy & cloud_closes))
+        ~survey_active
+        & ~dome_open
+        & (st_W | wx_close | wx_rh | (cloudy & cloud_closes))
     )
     applies["C2"] = ~survey_active & cloudy & (dome_open | ~cloud_closes)
     applies["C3"] = ~survey_active & ((dome_open & (st_W | wx_close)) | standby)
@@ -2727,18 +2745,43 @@ def alignment_table(seg):
     )
 
 
-def fault_episodes(runs, seg, windows, overrides=None, join_min=15.0):
+def runs_on_override(runs, overrides):
+    """True for fault runs that overlap an override row (storm, off-sky recovery, planned maintenance, ...)."""
+    if runs is None or len(runs) == 0 or overrides is None or len(overrides) == 0:
+        return np.zeros(0 if runs is None else len(runs), dtype=bool)
+    t0, t1 = overrides.t0.values, overrides.t1.values
+    return np.array(
+        [bool(((t0 < r.end) & (t1 > r.start)).any()) for r in runs.itertuples()],
+        dtype=bool,
+    )
+
+
+def fault_episodes(
+    runs,
+    seg,
+    windows,
+    overrides=None,
+    science=None,
+    join="science",
+    join_min=15.0,
+    on_override=False,
+):
     """ROSP-12 fault episodes from the FAULT record, independent of the ledger's D hours (shadow record included).
 
-    An episode is an unbroken FAULT stretch of the Scheduler state: the fault runs (one per night) that share
-    `episode_start`, so a fault carried through the day is one episode over several nights; stretches of the same
-    group less than `join_min` apart (a failed recovery that faults again) are joined. `hours` are its FAULT
-    hours inside observable nights, whatever category the ledger gave them; `under_weather_h` is the part the
-    ledger charged to C (the shadow record). `attributed_by`: CSC (clause or summary state), narrative note,
-    Operations decision (hand-set, no cause recorded) or override (a D1 / D2 override row with a group).
-    `class` is D2 if any of its nights is a whole-night fault by the ROSP-49 rule (no survey science visit, FAULT
-    covering the night to within d2_tolerance_min), else D1. `mttr_h` runs from the first FAULT minute in a night
-    to recovery when the FAULT ends inside that night; otherwise it is censored at that night's end.
+    A stretch is an unbroken FAULT stretch of the Scheduler state (the fault runs, one per night, that share
+    `episode_start`). With join="science" (round 5) consecutive stretches are one episode when they are the same CSC
+    (for a FAULT set by hand, the same attributed group; each stretch is keyed by how it started) with no survey
+    science visit (`science`: Intervals of survey open-shutter time) and no override night between them; join="gap"
+    is the round-4 rule (same group, less than `join_min` apart), kept for comparison; join="none" keeps every
+    stretch on its own. `on_override` False keeps the runs off override nights (the ROSP-12 headline), True only
+    the runs on override nights (listed stretch by stretch: there is no science to separate them).
+
+    `hours` are FAULT hours inside observable nights, whatever the ledger charged them to; `under_weather_h` is the
+    part in C (the shadow record). `class` is D2 if any of its nights is a whole-night fault by the ROSP-49 rule (no
+    survey science visit, FAULT covering the night to within d2_tolerance_min), else D1. D1: `mttr_h` from the first
+    FAULT minute to recovery, censored at night end when the FAULT runs to morning twilight (or into a later night).
+    D2: measured in nights (`length_nights`, from the first to the last night touched), censored at the end of the
+    data while the episode is still open.
     """
     cols = [
         "episode",
@@ -2752,14 +2795,26 @@ def fault_episodes(runs, seg, windows, overrides=None, join_min=15.0):
         "hours",
         "under_weather_h",
         "in_ledger_D_h",
-        "on_override_h",
+        "length_nights",
+        "whole_night_faults",
         "mttr_h",
         "censored",
+        "censored_at",
+        "override",
+        "n_stretches",
+        "runs",
         "first_note",
     ]
     if runs is None or len(runs) == 0:
-        return pd.DataFrame(columns=cols)
+        return pd.DataFrame(columns=cols).set_index("episode")
+    on_ov = runs_on_override(runs, overrides)
+    r = runs[on_ov == bool(on_override)].sort_values("start").copy()
+    if on_override:
+        join = "none"
+    if len(r) == 0:
+        return pd.DataFrame(columns=cols).set_index("episode")
     d2_nights = set(seg.attrs.get("d2_nights", []))
+    data_end = float(windows.end.max())
     seg_f = seg[seg.fault_run.notna()]
     by_run = seg_f.pivot_table(
         index="fault_run",
@@ -2768,8 +2823,6 @@ def fault_episodes(runs, seg, windows, overrides=None, join_min=15.0):
         aggfunc="sum",
         fill_value=0.0,
     )
-    ov = overrides if overrides is not None and len(overrides) else None
-    r = runs.sort_values("start").copy()
     r["key"] = np.round(r.episode_start.values.astype(float) * SECONDS_PER_DAY).astype(
         np.int64
     )
@@ -2778,19 +2831,41 @@ def fault_episodes(runs, seg, windows, overrides=None, join_min=15.0):
         named = g[g.group != OPERATIONS_DECISION]
         return (named.iloc[0] if len(named) else g.iloc[0]).group
 
-    stretches = [g.sort_values("start") for _, g in r.groupby("key", sort=False)]
+    def csc_of(g):
+        # How the stretch started: its first run's CSC ("" for a FAULT set by hand).
+        c = g.primary_csc.iloc[0]
+        return "" if c is None or (isinstance(c, float) and np.isnan(c)) else str(c)
+
+    stretches = sorted(
+        (g.sort_values("start") for _, g in r.groupby("key", sort=False)),
+        key=lambda x: x.start.iloc[0],
+    )
+    ov = overrides if overrides is not None and len(overrides) else None
     merged = []
-    for g in sorted(stretches, key=lambda x: x.start.iloc[0]):
-        if (
-            merged
-            and group_of(merged[-1]) == group_of(g)
-            and g.start.iloc[0] - merged[-1].end.iloc[-1] <= join_min / 1440.0
-        ):
-            merged[-1] = pd.concat([merged[-1], g])
-        else:
-            merged.append(g)
+    for g in stretches:
+        if merged and join != "none":
+            prev = merged[-1][-1]
+            gap0, gap1 = prev.end.iloc[-1], g.start.iloc[0]
+            if join == "science":
+                a, b = csc_of(prev), csc_of(g)
+                same = (a == b) if (a and b) else (group_of(prev) == group_of(g))
+                bridges_override = ov is not None and bool(
+                    ((ov.t0 < gap1) & (ov.t1 > gap0)).any()
+                )
+                ok = (
+                    same
+                    and not bridges_override
+                    and not (science is not None and science.overlaps(gap0, gap1))
+                )
+            else:
+                ok = group_of(prev) == group_of(g) and gap1 - gap0 <= join_min / 1440.0
+            if ok:
+                merged[-1].append(g)
+                continue
+        merged.append([g])
     rows = []
-    for n_ep, g in enumerate(merged):
+    for n_ep, parts in enumerate(merged):
+        g = pd.concat(parts)
         first, last = g.iloc[0], g.iloc[-1]
         named = g[g.group != OPERATIONS_DECISION]
         a = named.iloc[0] if len(named) else first
@@ -2805,12 +2880,11 @@ def fault_episodes(runs, seg, windows, overrides=None, join_min=15.0):
             )
         )
         group = a.group
-        on_ov = 0.0
+        ov_cats = []
         if ov is not None:
             for x in g.itertuples():
-                hit = ov[(ov.t0 < x.end) & (ov.t1 > x.start)]
-                for o in hit.itertuples():
-                    on_ov += (min(o.t1, x.end) - max(o.t0, x.start)) * 24.0
+                for o in ov[(ov.t0 < x.end) & (ov.t1 > x.start)].itertuples():
+                    ov_cats.append(o.category)
                     if o.category in ("D1", "D2") and o.group:
                         how, group = "override", o.group
         cats = (
@@ -2822,29 +2896,122 @@ def fault_episodes(runs, seg, windows, overrides=None, join_min=15.0):
         in_d = float(sum(cats.get(k, 0.0) for k in ("D1", "D2")))
         nights = [int(d) for d in dict.fromkeys(g.day_obs)]
         w_first, w_last = windows.loc[nights[0]], windows.loc[nights[-1]]
-        recovered = len(nights) == 1 and last.end < w_last.end - 1.0 / SECONDS_PER_DAY
-        mttr = ((last.end if recovered else w_first.end) - first.start) * 24.0
+        span = windows.index[
+            (windows.index >= nights[0]) & (windows.index <= nights[-1])
+        ]
+        cls = "D2" if any(d in d2_nights for d in nights) else "D1"
+        ended_in_night = last.end < w_last.end - 1.0 / SECONDS_PER_DAY
+        open_at_data_end = (
+            (not ended_in_night)
+            and nights[-1] == int(windows.index.max())
+            and last.end >= data_end - 1.0 / SECONDS_PER_DAY
+        )
+        if cls == "D2":
+            censored, censored_at = open_at_data_end, (
+                "data end" if open_at_data_end else ""
+            )
+            mttr = np.nan
+        else:
+            recovered = len(nights) == 1 and ended_in_night
+            censored, censored_at = (not recovered), ("" if recovered else "night end")
+            mttr = ((last.end if recovered else w_first.end) - first.start) * 24.0
         rows.append(
             {
                 "episode": n_ep + 1,
                 "start_utc": tai_mjd_to_utc_iso(first.episode_start)[:16],
                 "end_utc": tai_mjd_to_utc_iso(last.end)[:16]
-                + ("" if recovered else " (night end)"),
+                + (
+                    " (data end)"
+                    if open_at_data_end
+                    else "" if ended_in_night else " (night end)"
+                ),
                 "nights": ", ".join(map(str, nights)),
                 "group": group,
                 "attributed_by": how,
-                "primary_csc": a.primary_csc or "",
-                "class": "D2" if any(d in d2_nights for d in nights) else "D1",
+                "primary_csc": csc_of(g),
+                "class": cls,
                 "hours": float(g.hours.sum()),
                 "under_weather_h": under_c,
                 "in_ledger_D_h": in_d,
-                "on_override_h": on_ov,
+                "length_nights": len(span),
+                "whole_night_faults": int(sum(d in d2_nights for d in nights)),
                 "mttr_h": mttr,
-                "censored": not recovered,
+                "censored": bool(censored),
+                "censored_at": censored_at,
+                "override": ", ".join(sorted(set(ov_cats))),
+                "n_stretches": len(parts),
+                "runs": tuple(int(x) for x in g.fault_run),
                 "first_note": str(first.first_note)[:100],
             }
         )
     return pd.DataFrame(rows, columns=cols).set_index("episode")
+
+
+def episode_join_changes(new, old):
+    """Where two episode tables group the fault runs differently (e.g. the round-5 joining rule against the round-4
+    15-min gap): one row per set of episodes that share runs and are not one-to-one, saying whether the new rule
+    joined old episodes or split one."""
+    old_of = {run: ep for ep, runs in old.runs.items() for run in runs}
+    new_of = {run: ep for ep, runs in new.runs.items() for run in runs}
+    seen, rows = set(), []
+    for ep in new.index:
+        if ep in seen:
+            continue
+        news, olds = {ep}, set()
+        while True:
+            o2 = {old_of[r] for n in news for r in new.loc[n, "runs"] if r in old_of}
+            n2 = {
+                new_of[r] for o in o2 for r in old.loc[o, "runs"] if r in new_of
+            } | news
+            if o2 == olds and n2 == news:
+                break
+            olds, news = o2, n2
+        seen |= news
+        if len(news) == 1 and len(olds) == 1:
+            continue
+        nn, oo = new.loc[sorted(news)], old.loc[sorted(olds)]
+        rows.append(
+            {
+                "new episodes": ", ".join(map(str, sorted(news))),
+                "old episodes (15-min rule)": len(olds),
+                "change": (
+                    "joined"
+                    if len(news) == 1
+                    else "split" if len(olds) == 1 else "regrouped"
+                ),
+                "start_utc": nn.start_utc.iloc[0],
+                "end_utc": nn.end_utc.iloc[-1],
+                "CSC": ", ".join(dict.fromkeys(nn.primary_csc)),
+                "new classes": ", ".join(nn["class"]),
+                "old classes": ", ".join(oo["class"]),
+                "hours": round(float(nn.hours.sum()), 2),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def episode_summary(episodes):
+    """ROSP-12 headline numbers for an episode table."""
+    if len(episodes) == 0:
+        return {"episodes": 0}
+    d1, d2 = episodes[episodes["class"] == "D1"], episodes[episodes["class"] == "D2"]
+    return {
+        "episodes": len(episodes),
+        "FAULT hours": round(float(episodes.hours.sum()), 2),
+        "hidden by weather (h)": round(float(episodes.under_weather_h.sum()), 2),
+        "in the ledger's D1/D2 (h)": round(float(episodes.in_ledger_D_h.sum()), 2),
+        "D1 episodes": len(d1),
+        "D2 episodes": len(d2),
+        "censored": int(episodes.censored.sum()),
+        "median uncensored D1 MTTR (h)": (
+            round(float(d1.loc[~d1.censored, "mttr_h"].median()), 2)
+            if (~d1.censored).any()
+            else np.nan
+        ),
+        "D2 lengths (nights)": ", ".join(
+            f"{int(n)}{'+' if c else ''}" for n, c in zip(d2.length_nights, d2.censored)
+        ),
+    }
 
 
 SENSOR_INPUTS = (
