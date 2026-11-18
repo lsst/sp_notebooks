@@ -7,8 +7,10 @@ description: >
   visits with the rubin_scheduler slew model, the weather tower, the dome shutter, the
   inside dew-point sensors and, where available, the deep allskycam index, with the rule updates of 2026-11-16/17
   and round 3 (B2 only while available; BLOCK-T539 by context, start-up or recovery; A3 from -12 deg; measured
-  weather inside override D4; C3 weather standby by Weather Constraints regime R1-R4; D3 cap; a hand-set FAULT
-  takes its group from the narrative log, else Operations decision).
+  weather inside override D4; C3 weather standby by Weather Constraints regime R1-R4, thick cloud C1 only where
+  the regime has a cloud criterion; post-precipitation holds and icing only with log evidence; D3 cap; a hand-set
+  FAULT takes its group from the narrative log, else Operations decision), with a ROSP-12 fault-episode table and
+  per-night sensor coverage.
   Reports the per-night ledger, cycle fractions by category with the short losses (D1 + E), fault loss by
   subsystem group, the shadow record (never added to the totals), the sensitivity to the rules still pending, and
   the pending attribution corrections as a what-if (not applied).

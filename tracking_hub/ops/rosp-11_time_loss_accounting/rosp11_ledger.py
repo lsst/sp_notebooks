@@ -33,10 +33,10 @@ from astropy.time import Time, TimeDelta
 
 # Bumped whenever a function signature or a returned column changes, so the notebook can refuse a module
 # that does not match it (on Times Square the module is fetched from GitHub, not read from the checkout).
-MODULE_API_VERSION = 3
+MODULE_API_VERSION = 4
 
 TAXONOMY_VERSION = (
-    "v1.0 (pending ROSP-24 sign-off; rule updates of 2026-11-16/17, round 3)"
+    "v1.0 (pending ROSP-24 sign-off; rule updates of 2026-11-16/17, rounds 3-4)"
 )
 
 GITHUB_REPO = "lsst/sp_notebooks"
@@ -290,7 +290,9 @@ KNOWN_GAPS = (
     "Gusts 'for several data points' (R2-R4) read as >= 3 of the last 5 one-minute maxima; R2 're-open after 15 min "
     "under 20 m/s' read as 1-min gust maxima under 20 m/s.",
     "Inside-sensor and glass dew-point criteria use 1-min means of ESS:111/112/113 and ESS:115 item 3; a sensor "
-    "outage removes the criterion silently for that minute.",
+    "outage removes the criterion for that minute (the per-night sensor-coverage flag shows where).",
+    "The log evidence for holds and icing is a keyword search (English and Spanish; negated and forecast mentions "
+    "skipped) of the night report and the Simonyi narrative log, not a reading of the entries.",
 )
 
 
@@ -326,6 +328,12 @@ class Rules:
     weather_regimes: tuple = WEATHER_REGIMES
     wind_regimes: tuple = WIND_REGIMES
     post_precip: tuple = tuple(POST_PRECIP.items())
+    # The post-precipitation holds and icing stand only with log evidence (night report or narrative log) of
+    # precipitation, ice, snow, frost or wet structures in, or this long before, the hold (ROSP-58, round 4).
+    precip_log_gate: bool = True
+    precip_log_margin_h: float = 3.0
+    # R1-R2 "do not open above RH 70 %" applies whenever the dome is closed, not only before the first opening.
+    do_not_open_any_closure: bool = True
     # Cloud: the deep allskycam index (ext_deep, mag). "Unusable" (C1 closed / C2 open) and R1-R3 "heavy and
     # dark" = the thick class, ext_deep above this. The standard index (> 0.5) is the fallback.
     cloud_source: str = "deep"
@@ -341,6 +349,8 @@ class Rules:
     fault_onset_lookback_h: float = 24.0
     # Narrative-log window for a hand-set FAULT: from this long before the FAULT episode began to the run's end.
     narrative_margin_min: float = 30.0
+    # ROSP-12 fault episodes: FAULT stretches of the same group less than this apart are one episode (round 4).
+    episode_join_min: float = 15.0
 
     def regime(self, day_obs):
         rows = sorted(self.weather_regimes, key=lambda r: r["from_dayobs"])
@@ -419,6 +429,18 @@ RULE_NOTES = {
         "provisional",
         "page 1241514042 is a draft proposal: its C3 hours are provisional",
     ),
+    "precip_log_gate": (
+        "decided",
+        "holds and icing need log evidence (round 4, 2026-11-17)",
+    ),
+    "precip_log_margin_h": (
+        "parameter",
+        "how far before a hold a log entry still counts",
+    ),
+    "do_not_open_any_closure": (
+        "decided",
+        "Weather Constraints R1-R2 do-not-open RH > 70 %",
+    ),
     "cloud_source": (
         "decided",
         "deep allskycam index (ext_deep), rubin_notebooks 5e8d76b",
@@ -454,6 +476,10 @@ RULE_NOTES = {
     "narrative_margin_min": (
         "parameter",
         "narrative-log window before a hand-set FAULT episode",
+    ),
+    "episode_join_min": (
+        "parameter",
+        "ROSP-12 episodes: same-group FAULT stretches closer than this are one",
     ),
 }
 
@@ -1352,21 +1378,212 @@ def cloud_flags(cam, rules):
 # ---------------------------------------------------------------------------------------------------------------
 
 
-def weather_minutes(env, cam, rain, windows, rules):
+PRECIP_LOG_RE = re.compile(
+    r"\b(rain\w*|snow\w*|ice|icing|iced|icy|frost\w*|sleet\w*|wet|wetness|drip\w*|lluvi\w*|llovizn\w*|nieve|nevad\w*"
+    r"|hielo|helad\w*|escarcha\w*)\b",
+    re.IGNORECASE,
+)
+# A term preceded (within ~40 characters) by a negation or a forecast word is not evidence ("no signs of rain").
+PRECIP_LOG_NEGATION_RE = re.compile(
+    r"\b(no|not|without|nor|zero|sin|ningun\w*|forecast\w*|chance|probabilit\w*|pron[oó]stico|potential\w*|possibl\w*"
+    r"|upcoming|expected|expecting|in case)\b",
+    re.IGNORECASE,
+)
+
+
+def fetch_night_reports(night_report_client, day_obs_list):
+    """Simonyi night-report text (summary, Simonyi summary and weather) per dayObs; valid reports only."""
+    rows = []
+    for d in day_obs_list:
+        try:
+            reports, _ = night_report_client.query_night_report(
+                int(d), telescope="Simonyi", return_html=False
+            )
+        except Exception as err:
+            print(f"  night report {d}: {type(err).__name__}: {err}")
+            continue
+        for r in reports or []:
+            if r.get("is_valid") is False:
+                continue
+            text = " ".join(
+                str(r.get(k) or "") for k in ("summary", "maintel_summary", "weather")
+            )
+            rows.append({"day_obs": int(d), "text": " ".join(text.split())})
+    return pd.DataFrame(rows, columns=["day_obs", "text"])
+
+
+def precip_log_hits(text):
+    """Precipitation / ice / wet-structure terms in `text` that are not negated or forecast; a list of snippets."""
+    hits = []
+    for m in PRECIP_LOG_RE.finditer(text or ""):
+        before = text[max(0, m.start() - 40) : m.start()]
+        if PRECIP_LOG_NEGATION_RE.search(before):
+            continue
+        hits.append(text[max(0, m.start() - 50) : m.end() + 50].strip())
+    return hits
+
+
+def precip_log_evidence(logs, day_obs, t0, t1, margin_h):
+    """(backed, source, quote): log evidence of precipitation, ice, snow, frost or wet structures for a hold
+    window [t0, t1] on `day_obs`: a narrative-log entry from `margin_h` before the window to its end, or the
+    night report of that dayObs."""
+    if logs is None:
+        return False, "no logs", ""
+    narr = logs.get("narrative")
+    if narr is not None and len(narr):
+        sub = narr[(narr.t0 <= t1) & (narr.t1 >= t0 - margin_h / 24.0)]
+        for text in sub.text:
+            hits = precip_log_hits(text)
+            if hits:
+                return True, "narrative log", hits[0][:110]
+    reports = logs.get("reports")
+    if reports is not None and len(reports):
+        for text in reports[reports.day_obs == day_obs].text:
+            hits = precip_log_hits(text)
+            if hits:
+                return True, "night report", hits[0][:110]
+    return False, "", ""
+
+
+def _standby_pass(
+    t,
+    w,
+    R,
+    W,
+    rules,
+    close,
+    wind_close,
+    wet,
+    dome_open,
+    rh,
+    temp,
+    spread,
+    gust,
+    derived,
+    hold_ok,
+):
+    """One pass of the per-minute standby state machine for one night (see weather_minutes)."""
+    pp = dict(rules.post_precip)
+    spread_med30, spread_min30, spread_prev30, gust_ok, humid = derived
+    last_morning = w.full_end - rules.morning_margin_h / 24.0
+    n = len(t)
+    standby = np.zeros(n, dtype=bool)
+    reason = np.full(n, "", dtype=object)
+    prov = np.zeros(n, dtype=bool)
+    closed, wind_episode, last_close, stable, iced, opened_once = (
+        False,
+        False,
+        -np.inf,
+        0,
+        False,
+        False,
+    )
+    rain_hold, humid_hold, wet_until = -np.inf, -np.inf, -np.inf
+    for i in range(n):
+        if wet[i]:
+            if not temp[i] <= pp["icing_temp_c"]:
+                rain_hold = t[i] + pp["rain_hold_min"] * MINUTE
+            wet_until = t[i] + pp["wet_memory_min"] * MINUTE
+        if humid[i]:
+            humid_hold = t[i] + pp["humid_hold_min"] * MINUTE
+            wet_until = t[i] + pp["wet_memory_min"] * MINUTE
+        if temp[i] <= pp["icing_temp_c"] and t[i] < wet_until and hold_ok[i]:
+            iced = True
+        if dome_open[i]:
+            closed, wind_episode, iced, stable, opened_once = (
+                False,
+                False,
+                False,
+                0,
+                True,
+            )
+            rain_hold = humid_hold = -np.inf
+            continue
+        if close[i]:
+            closed, last_close, stable = True, t[i], 0
+            wind_episode |= bool(wind_close[i])
+            continue
+        stable += 1
+        if t[i] < w.start:
+            continue
+        why, provisional = "", False
+        if iced:
+            why, provisional = "icing: structures wet below 0 C (provisional)", True
+        elif closed:
+            if R["reopen"] == "spread":
+                ok = (
+                    (t[i] - last_close) * 1440 >= 30
+                    and spread_med30[i] > R["reopen_spread_median"]
+                    and spread_min30[i] > R["reopen_spread_min"]
+                )
+            else:
+                ok = stable >= R["stable_min"] and (
+                    R["rh_do_not_open"] is None or rh[i] <= R["rh_do_not_open"]
+                )
+            if wind_episode:
+                ok = ok and bool(gust_ok[i])
+            if ok and t[i] < last_morning:
+                closed, wind_episode = False, False
+            else:
+                why = (
+                    f"re-opening criteria not met ({R['regime']})"
+                    if t[i] < last_morning
+                    else "within 1 h of morning -12 deg"
+                )
+        elif not opened_once:
+            if R["initial"] == "spread":
+                prev = spread_prev30[i] if np.isfinite(spread_prev30[i]) else -np.inf
+                ok = (
+                    spread[i] > R["initial_spread"]
+                    and spread[i] >= prev - 0.1
+                    and gust[i] < 20
+                )
+            else:
+                ok = R["rh_do_not_open"] is None or rh[i] <= R["rh_do_not_open"]
+            if ok and t[i] < last_morning:
+                opened_once = True  # the criteria allowed opening; from here a closed dome needs a weather reason
+            else:
+                why = (
+                    f"initial-opening criteria not met ({R['regime']})"
+                    if t[i] < last_morning
+                    else "within 1 h of morning -12 deg"
+                )
+        elif (
+            rules.do_not_open_any_closure
+            and R["rh_do_not_open"] is not None
+            and rh[i] > R["rh_do_not_open"]
+        ):
+            why = f"do-not-open: RH > {R['rh_do_not_open']:g} % ({R['regime']})"
+        if not why and t[i] < rain_hold and hold_ok[i]:
+            why, provisional = "post-precipitation hold (provisional)", True
+        if not why and t[i] < humid_hold and hold_ok[i]:
+            why, provisional = "post-humidity hold (provisional)", True
+        if why:
+            standby[i], reason[i], prov[i] = True, why, provisional
+    return standby, reason, prov
+
+
+def weather_minutes(env, cam, rain, windows, rules, logs=None):
     """Per-minute weather evidence by the Weather Constraints regime in force each night.
 
     `close`: a closing criterion of the regime (tower spread, inside sensors or M1M3 glass near the dew point,
-    wind, rain, and for R1-R3 heavy cloud). `bad` = close or allskycam-unusable cloud (ROSP-24 C1/C2).
+    wind, rain, and for R1-R3 heavy cloud); `close_nc` the same without cloud. `bad` = close or thick cloud.
     `standby` (C3) applies only with the dome closed: after a closure, until the regime's re-opening criteria are
-    met; at the start of the night, until its initial-opening criteria are met; within `morning_margin_h` of
-    morning -12 deg when the dome could not yet open; and the post-precipitation holds (provisional). An
-    opening ends any standby. `reason` names the criterion; `provisional` marks the post-precipitation proposal.
+    met; at the start of the night, until its initial-opening criteria are met; for R1-R2, whenever RH is above
+    the do-not-open limit; within `morning_margin_h` of morning -12 deg when the dome could not yet open; and the
+    post-precipitation holds and icing (provisional). An opening ends any standby.
+
+    With `rules.precip_log_gate`, a post-precipitation hold, post-humidity hold or icing episode stands only if the
+    night report or the narrative log (`logs` = {"narrative": ..., "reports": ...}) records precipitation, ice,
+    snow, frost or wet structures in or `precip_log_margin_h` before it; otherwise the night is re-run without
+    it and its time falls through. The episodes and their evidence are in `.attrs["hold_episodes"]`.
     """
     cols = [
         "t",
         "day_obs",
         "known",
         "close",
+        "close_nc",
         "bad",
         "close_reason",
         "standby",
@@ -1374,12 +1591,24 @@ def weather_minutes(env, cam, rain, windows, rules):
         "provisional",
         "regime",
     ]
+    ep_cols = [
+        "day_obs",
+        "kind",
+        "start",
+        "end",
+        "minutes",
+        "backed",
+        "source",
+        "quote",
+    ]
     if len(env) == 0:
-        return pd.DataFrame(columns=cols)
+        out = pd.DataFrame(columns=cols)
+        out.attrs["hold_episodes"] = pd.DataFrame(columns=ep_cols)
+        return out
     pp = dict(rules.post_precip)
     lead = rules.standby_lead_h / 24.0
     t_env = env.t.values
-    out = []
+    out, episodes = [], []
     for day_obs, w in windows.iterrows():
         sel = (t_env >= w.start - lead) & (t_env < w.end)
         if not sel.any():
@@ -1427,30 +1656,22 @@ def weather_minutes(env, cam, rain, windows, rules):
             else:
                 wind_close = (gust >= W["gust_close"]).values
         wet = rain.contains(t + 0.5 * MINUTE)
-        close = m_spread | m_sustained | m_inside | m_glass | wind_close | wet
+        close_nc = m_spread | m_sustained | m_inside | m_glass | wind_close | wet
         if cam is not None and len(cam):
+            cam_t = cam.t.values - 0.5 * MINUTE
             cloudy = (
                 _lookup_bins(
-                    cam.t.values - 0.5 * MINUTE,
-                    MINUTE,
-                    cam.cloudy.values.astype(float),
-                    t + 0.5 * MINUTE,
+                    cam_t, MINUTE, cam.cloudy.values.astype(float), t + 0.5 * MINUTE
                 )
                 == 1
             )
             cloud_known = np.isfinite(
-                _lookup_bins(
-                    cam.t.values - 0.5 * MINUTE,
-                    MINUTE,
-                    cam.cloud_value.values,
-                    t + 0.5 * MINUTE,
-                )
+                _lookup_bins(cam_t, MINUTE, cam.cloud_value.values, t + 0.5 * MINUTE)
             )
         else:
             cloudy = np.zeros(len(t), dtype=bool)
             cloud_known = np.zeros(len(t), dtype=bool)
-        if R["cloud_closes"]:
-            close |= cloudy
+        close = close_nc | (cloudy if R["cloud_closes"] else none)
         bad = close | cloudy
         close_reason = np.select(
             [wet, wind_close, m_spread, m_sustained, m_inside, m_glass, cloudy],
@@ -1468,104 +1689,74 @@ def weather_minutes(env, cam, rain, windows, rules):
         known = np.isfinite(rh) | np.isfinite(wind.values) | cloud_known
         with np.errstate(invalid="ignore"):
             dome_open = e.shutter.values > rules.dome_open_pct
-            spread_med30 = spread.rolling(30, min_periods=20).median().values
-            spread_min30 = spread.rolling(30, min_periods=20).min().values
-            spread_prev30 = spread.shift(30).values
-            gust_ok = (
+            derived = (
+                spread.rolling(30, min_periods=20).median().values,
+                spread.rolling(30, min_periods=20).min().values,
+                spread.shift(30).values,
                 gust.rolling(W["reopen_min"], min_periods=W["reopen_min"]).max().values
-                < W["reopen_gust"]
+                < W["reopen_gust"],
+                (rh > pp["humid_rh"]) & (temp > pp["icing_temp_c"]),
             )
-            humid = (rh > pp["humid_rh"]) & (temp > pp["icing_temp_c"])
-        last_morning = w.full_end - rules.morning_margin_h / 24.0
-        standby = np.zeros(len(t), dtype=bool)
-        reason = np.full(len(t), "", dtype=object)
-        prov = np.zeros(len(t), dtype=bool)
-        closed, wind_episode, last_close, stable, iced, opened_once = (
-            False,
-            False,
-            -np.inf,
-            0,
-            False,
-            False,
+        args = (
+            t,
+            w,
+            R,
+            W,
+            rules,
+            close,
+            wind_close,
+            wet,
+            dome_open,
+            rh,
+            temp,
+            spread.values,
+            gust.values,
+            derived,
         )
-        rain_hold, humid_hold, wet_until = -np.inf, -np.inf, -np.inf
-        for i in range(len(t)):
-            if wet[i]:
-                if not temp[i] <= pp["icing_temp_c"]:
-                    rain_hold = t[i] + pp["rain_hold_min"] * MINUTE
-                wet_until = t[i] + pp["wet_memory_min"] * MINUTE
-            if humid[i]:
-                humid_hold = t[i] + pp["humid_hold_min"] * MINUTE
-                wet_until = t[i] + pp["wet_memory_min"] * MINUTE
-            if temp[i] <= pp["icing_temp_c"] and t[i] < wet_until:
-                iced = True
-            if dome_open[i]:
-                closed, wind_episode, iced, stable, opened_once = (
-                    False,
-                    False,
-                    False,
-                    0,
-                    True,
+        hold_ok = np.ones(len(t), dtype=bool)
+        standby, reason, prov = _standby_pass(*args, hold_ok)
+        # Hold / icing episodes (consecutive provisional minutes of one kind) and their log evidence.
+        kind = np.array(
+            [
+                r.split(":")[0].replace(" (provisional)", "") if p else ""
+                for r, p in zip(reason, prov)
+            ],
+            dtype=object,
+        )
+        run_id = np.cumsum(np.r_[True, kind[1:] != kind[:-1]])
+        gated = False
+        for g in np.unique(run_id[kind != ""]):
+            idx = np.flatnonzero(run_id == g)
+            t0, t1 = t[idx[0]], t[idx[-1]] + MINUTE
+            if rules.precip_log_gate:
+                backed, source, quote = precip_log_evidence(
+                    logs, day_obs, t0, t1, rules.precip_log_margin_h
                 )
-                rain_hold = humid_hold = -np.inf
-                continue
-            if close[i]:
-                closed, last_close, stable = True, t[i], 0
-                wind_episode |= bool(wind_close[i])
-                continue
-            stable += 1
-            if t[i] < w.start:
-                continue
-            why, provisional = "", False
-            if iced:
-                why, provisional = "icing: structures wet below 0 C (provisional)", True
-            elif closed:
-                if R["reopen"] == "spread":
-                    ok = (
-                        (t[i] - last_close) * 1440 >= 30
-                        and spread_med30[i] > R["reopen_spread_median"]
-                        and spread_min30[i] > R["reopen_spread_min"]
-                    )
-                else:
-                    ok = stable >= R["stable_min"] and (
-                        R["rh_do_not_open"] is None or rh[i] <= R["rh_do_not_open"]
-                    )
-                if wind_episode:
-                    ok = ok and bool(gust_ok[i])
-                if ok and t[i] < last_morning:
-                    closed, wind_episode = False, False
-                else:
-                    why = (
-                        f"re-opening criteria not met ({R['regime']})"
-                        if t[i] < last_morning
-                        else "within 1 h of morning -12 deg"
-                    )
-            elif not opened_once:
-                if R["initial"] == "spread":
-                    prev = (
-                        spread_prev30[i] if np.isfinite(spread_prev30[i]) else -np.inf
-                    )
-                    ok = (
-                        spread.values[i] > R["initial_spread"]
-                        and spread.values[i] >= prev - 0.1
-                        and gust.values[i] < 20
-                    )
-                else:
-                    ok = R["rh_do_not_open"] is None or rh[i] <= R["rh_do_not_open"]
-                if ok and t[i] < last_morning:
-                    opened_once = True  # the criteria allowed opening; a closed dome from here is not weather
-                else:
-                    why = (
-                        f"initial-opening criteria not met ({R['regime']})"
-                        if t[i] < last_morning
-                        else "within 1 h of morning -12 deg"
-                    )
-            if not why and t[i] < rain_hold:
-                why, provisional = "post-precipitation hold (provisional)", True
-            if not why and t[i] < humid_hold:
-                why, provisional = "post-humidity hold (provisional)", True
-            if why:
-                standby[i], reason[i], prov[i] = True, why, provisional
+            else:
+                backed, source, quote = True, "gate off", ""
+            episodes.append(
+                {
+                    "day_obs": day_obs,
+                    "kind": kind[idx[0]],
+                    "start": t0,
+                    "end": t1,
+                    "minutes": len(idx),
+                    "backed": backed,
+                    "source": source,
+                    "quote": quote,
+                }
+            )
+            if not backed:
+                lo = max(idx[0] - 1, 0)
+                if (
+                    kind[idx[0]] == "icing"
+                ):  # icing is set when the temperature drops, possibly well before
+                    opened = np.flatnonzero(dome_open[: idx[0]])
+                    lo = opened[-1] + 1 if len(opened) else 0
+                hold_ok[lo : idx[-1] + 1] = False
+                gated = True
+        if gated:
+            standby, reason, prov = _standby_pass(*args, hold_ok)
         night = t >= w.start
         out.append(
             pd.DataFrame(
@@ -1574,6 +1765,7 @@ def weather_minutes(env, cam, rain, windows, rules):
                     "day_obs": day_obs,
                     "known": known[night],
                     "close": close[night],
+                    "close_nc": close_nc[night],
                     "bad": bad[night],
                     "close_reason": close_reason[night],
                     "standby": standby[night] & known[night],
@@ -1583,7 +1775,9 @@ def weather_minutes(env, cam, rain, windows, rules):
                 }
             )
         )
-    return pd.concat(out, ignore_index=True) if out else pd.DataFrame(columns=cols)
+    res = pd.concat(out, ignore_index=True) if out else pd.DataFrame(columns=cols)
+    res.attrs["hold_episodes"] = pd.DataFrame(episodes, columns=ep_cols)
+    return res
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -1923,10 +2117,20 @@ def build_ledger(
         provisional = standby & wxm.provisional.values[k].astype(bool)
         regime = np.where(wx_known, wxm.regime.values[k], "")
         close_reason = np.where(wx_bad, wxm.close_reason.values[k], "")
+        wx_close = (
+            _lookup_bins(wt, MINUTE, wxm.close_nc.values.astype(float), mid) == 1
+        ) & wx_known
     else:
-        wx_known = wx_bad = standby = provisional = np.zeros(n, dtype=bool)
+        wx_known = wx_bad = wx_close = standby = provisional = np.zeros(n, dtype=bool)
         standby_reason = regime = close_reason = np.full(n, "", dtype=object)
     wx_bad = wx_bad | cloudy
+    # Thick cloud is a closing criterion (C1) only where the regime in force has one (R1-R3, "heavy and dark");
+    # elsewhere it is C2, unusable for cloud, whatever the dome did (round 4).
+    regime_of = {d: rules.regime(d) for d in np.unique(day_obs)}
+    cloud_closes = np.array(
+        [bool(regime_of[d]["cloud_closes"]) for d in day_obs], dtype=bool
+    )
+    regime_name = np.array([regime_of[d]["regime"] for d in day_obs], dtype=object)
     weather_data = wx_known | cam_known
 
     a1 = seq["a1"].contains(mid)
@@ -1946,9 +2150,19 @@ def build_ledger(
     applies["C_override"] = np.isin(ov_cat, ["C1", "C4"]) | (
         (ov_cat == "C5") & ~weather_data
     )
-    applies["C1"] = ~survey_active & ~dome_open & (st_W | wx_bad)
-    applies["C2"] = ~survey_active & dome_open & cloudy
-    applies["C3"] = ~survey_active & ((dome_open & (st_W | wx_bad)) | standby)
+    applies["C1"] = (
+        ~survey_active & ~dome_open & (st_W | wx_close | (cloudy & cloud_closes))
+    )
+    applies["C2"] = ~survey_active & cloudy & (dome_open | ~cloud_closes)
+    applies["C3"] = ~survey_active & ((dome_open & (st_W | wx_close)) | standby)
+    c2_why = np.where(
+        dome_open,
+        "thick cloud (allskycam), dome open",
+        np.char.add(
+            "thick cloud (allskycam), no cloud closing criterion in ",
+            regime_name.astype(str),
+        ),
+    ).astype(object)
     applies["C5_to_D4"] = (ov_cat == "C5") & weather_data
     applies["B2a_override"] = ov_cat == "B2a"
     applies["B2a"] = activity & ~dome_closed & available & ~on_override
@@ -1969,7 +2183,7 @@ def build_ledger(
         (applies["B1"], "B1", "override B1"),
         (applies["C_override"], ov_cat, "override"),
         (applies["C1"], "C1", ""),
-        (applies["C2"], "C2", "allskycam"),
+        (applies["C2"], "C2", c2_why),
         (applies["C3"], "C3", ""),
         (applies["B2a_override"], "B2a", "override B2a"),
         (applies["B2a"], "B2a", ""),
@@ -1990,7 +2204,7 @@ def build_ledger(
     for mask, cat, why in choices:
         take = mask & ~done
         category[take] = cat[take] if isinstance(cat, np.ndarray) else cat
-        detail[take] = why
+        detail[take] = why[take] if isinstance(why, np.ndarray) else why
         done |= take
     c_ev = np.where(st_W, "WEATHER state", "")
     measured = np.where(close_reason != "", close_reason, "thick cloud (allskycam)")
@@ -2146,8 +2360,9 @@ def _apply_alignment_recovery(seg, rules):
 
     Looking back from the run's start over the same night, past idle (E / F) time and other alignment time, the
     first other segment decides: a fault (D1 / D2) -> the same category and group; unplanned downtime (D4) -> D4,
-    same group; weather (C) -> `t539_after_weather` (C3 by default, D1 the alternative); engineering (B) or survey
-    (A, D3) -> E (no interruption). T539 is never B2a. Only E / F alignment time is re-categorised.
+    same group; weather (C) -> `t539_after_weather` (C3 by default, D1 the alternative); engineering -> the B2a or
+    B2b of the block it follows (round 4); survey (A, D3) or nothing -> E (no interruption). Only E / F alignment
+    time is re-categorised.
     """
     seg = seg.copy()
     cat, det, grp = (
@@ -2173,8 +2388,8 @@ def _apply_alignment_recovery(seg, rules):
                     kind, src = "downtime", i
                 elif c.startswith("C"):
                     kind, src = "weather", i
-                elif c.startswith("B"):
-                    kind = "engineering"
+                elif c in ("B2a", "B2b"):
+                    kind, src = "engineering", i
                 else:
                     kind = "none"
                 break
@@ -2188,6 +2403,9 @@ def _apply_alignment_recovery(seg, rules):
                 det[take] = "T539 recovery after weather"
                 if rules.t539_after_weather.startswith("D"):
                     grp[take] = PENDING
+            elif kind == "engineering":
+                cat[take] = cat[src]
+                det[take] = "T539 recovery after engineering"
             else:
                 cat[take] = "E"
                 det[take] = f"T539 recovery, no interruption before it ({kind})"
@@ -2507,6 +2725,189 @@ def alignment_table(seg):
         runs=("alignment_run", "nunique"),
         nights=("day_obs", "nunique"),
     )
+
+
+def fault_episodes(runs, seg, windows, overrides=None, join_min=15.0):
+    """ROSP-12 fault episodes from the FAULT record, independent of the ledger's D hours (shadow record included).
+
+    An episode is an unbroken FAULT stretch of the Scheduler state: the fault runs (one per night) that share
+    `episode_start`, so a fault carried through the day is one episode over several nights; stretches of the same
+    group less than `join_min` apart (a failed recovery that faults again) are joined. `hours` are its FAULT
+    hours inside observable nights, whatever category the ledger gave them; `under_weather_h` is the part the
+    ledger charged to C (the shadow record). `attributed_by`: CSC (clause or summary state), narrative note,
+    Operations decision (hand-set, no cause recorded) or override (a D1 / D2 override row with a group).
+    `class` is D2 if any of its nights is a whole-night fault by the ROSP-49 rule (no survey science visit, FAULT
+    covering the night to within d2_tolerance_min), else D1. `mttr_h` runs from the first FAULT minute in a night
+    to recovery when the FAULT ends inside that night; otherwise it is censored at that night's end.
+    """
+    cols = [
+        "episode",
+        "start_utc",
+        "end_utc",
+        "nights",
+        "group",
+        "attributed_by",
+        "primary_csc",
+        "class",
+        "hours",
+        "under_weather_h",
+        "in_ledger_D_h",
+        "on_override_h",
+        "mttr_h",
+        "censored",
+        "first_note",
+    ]
+    if runs is None or len(runs) == 0:
+        return pd.DataFrame(columns=cols)
+    d2_nights = set(seg.attrs.get("d2_nights", []))
+    seg_f = seg[seg.fault_run.notna()]
+    by_run = seg_f.pivot_table(
+        index="fault_run",
+        columns="category",
+        values="hours",
+        aggfunc="sum",
+        fill_value=0.0,
+    )
+    ov = overrides if overrides is not None and len(overrides) else None
+    r = runs.sort_values("start").copy()
+    r["key"] = np.round(r.episode_start.values.astype(float) * SECONDS_PER_DAY).astype(
+        np.int64
+    )
+
+    def group_of(g):
+        named = g[g.group != OPERATIONS_DECISION]
+        return (named.iloc[0] if len(named) else g.iloc[0]).group
+
+    stretches = [g.sort_values("start") for _, g in r.groupby("key", sort=False)]
+    merged = []
+    for g in sorted(stretches, key=lambda x: x.start.iloc[0]):
+        if (
+            merged
+            and group_of(merged[-1]) == group_of(g)
+            and g.start.iloc[0] - merged[-1].end.iloc[-1] <= join_min / 1440.0
+        ):
+            merged[-1] = pd.concat([merged[-1], g])
+        else:
+            merged.append(g)
+    rows = []
+    for n_ep, g in enumerate(merged):
+        first, last = g.iloc[0], g.iloc[-1]
+        named = g[g.group != OPERATIONS_DECISION]
+        a = named.iloc[0] if len(named) else first
+        rule = str(a.primary_rule)
+        how = (
+            "narrative note"
+            if rule.startswith("hand-set FAULT; cause")
+            else (
+                "Operations decision"
+                if rule.startswith("hand-set FAULT; no cause")
+                else "CSC"
+            )
+        )
+        group = a.group
+        on_ov = 0.0
+        if ov is not None:
+            for x in g.itertuples():
+                hit = ov[(ov.t0 < x.end) & (ov.t1 > x.start)]
+                for o in hit.itertuples():
+                    on_ov += (min(o.t1, x.end) - max(o.t0, x.start)) * 24.0
+                    if o.category in ("D1", "D2") and o.group:
+                        how, group = "override", o.group
+        cats = (
+            by_run.reindex(g.fault_run.values).fillna(0.0).sum()
+            if len(by_run)
+            else pd.Series(dtype=float)
+        )
+        under_c = float(sum(v for k, v in cats.items() if str(k).startswith("C")))
+        in_d = float(sum(cats.get(k, 0.0) for k in ("D1", "D2")))
+        nights = [int(d) for d in dict.fromkeys(g.day_obs)]
+        w_first, w_last = windows.loc[nights[0]], windows.loc[nights[-1]]
+        recovered = len(nights) == 1 and last.end < w_last.end - 1.0 / SECONDS_PER_DAY
+        mttr = ((last.end if recovered else w_first.end) - first.start) * 24.0
+        rows.append(
+            {
+                "episode": n_ep + 1,
+                "start_utc": tai_mjd_to_utc_iso(first.episode_start)[:16],
+                "end_utc": tai_mjd_to_utc_iso(last.end)[:16]
+                + ("" if recovered else " (night end)"),
+                "nights": ", ".join(map(str, nights)),
+                "group": group,
+                "attributed_by": how,
+                "primary_csc": a.primary_csc or "",
+                "class": "D2" if any(d in d2_nights for d in nights) else "D1",
+                "hours": float(g.hours.sum()),
+                "under_weather_h": under_c,
+                "in_ledger_D_h": in_d,
+                "on_override_h": on_ov,
+                "mttr_h": mttr,
+                "censored": not recovered,
+                "first_note": str(first.first_note)[:100],
+            }
+        )
+    return pd.DataFrame(rows, columns=cols).set_index("episode")
+
+
+SENSOR_INPUTS = (
+    "ESS:301 tower",
+    "ESS:111",
+    "ESS:112",
+    "ESS:113",
+    "ESS:115 glass",
+    "allskycam deep",
+    "dome",
+)
+
+
+def sensor_coverage(env, cam, windows, rules, min_fraction=0.9):
+    """Per night: the fraction of the observable night each weather / dome input covers, and the inputs below
+    `min_fraction`, split into those the night's regime uses and those it does not."""
+    rows = []
+    for d, w in windows.iterrows():
+        n_min = max(int(round((w.end - w.start) * 1440)), 1)
+        e = env[(env.t >= w.start) & (env.t < w.end)] if len(env) else env
+        frac = lambda m: float(np.count_nonzero(m)) / n_min  # noqa: E731
+        cov = {
+            "ESS:301 tower": (
+                frac(np.isfinite(e.dpd.values) & np.isfinite(e.gust.values))
+                if len(e)
+                else 0.0
+            ),
+            **{
+                f"ESS:{k}": (
+                    frac(np.isfinite(e[f"t_{k}"].values - e[f"td_{k}"].values))
+                    if len(e)
+                    else 0.0
+                )
+                for k in ("111", "112", "113")
+            },
+            "ESS:115 glass": frac(np.isfinite(e.t_glass.values)) if len(e) else 0.0,
+            "dome": frac(np.isfinite(e.shutter.values)) if len(e) else 0.0,
+        }
+        if cam is not None and len(cam):
+            ct = cam.t.values[(cam.t.values >= w.start) & (cam.t.values < w.end)]
+            cov["allskycam deep"] = (
+                len(np.unique(np.floor((ct - w.start) * 1440))) / n_min
+            )
+        else:
+            cov["allskycam deep"] = 0.0
+        R = rules.regime(d)
+        used = {"ESS:301 tower", "allskycam deep", "dome"}
+        if R["inside_close"] is not None:
+            used |= {"ESS:111", "ESS:112", "ESS:113"}
+        if R["glass_close"] is not None:
+            used |= {"ESS:115 glass", "ESS:113"}
+        low = [k for k in SENSOR_INPUTS if cov[k] < min_fraction]
+        fmt = lambda k: f"{k} ({cov[k]:.0%})"  # noqa: E731
+        rows.append(
+            {
+                "day_obs": d,
+                "regime": R["regime"],
+                **{k: round(cov[k], 3) for k in SENSOR_INPUTS},
+                "missing (used)": ", ".join(fmt(k) for k in low if k in used),
+                "missing (not used)": ", ".join(fmt(k) for k in low if k not in used),
+            }
+        )
+    return pd.DataFrame(rows).set_index("day_obs")
 
 
 def precedence_checks(seg):
