@@ -33,10 +33,10 @@ from astropy.time import Time, TimeDelta
 
 # Bumped whenever a function signature or a returned column changes, so the notebook can refuse a module
 # that does not match it (on Times Square the module is fetched from GitHub, not read from the checkout).
-MODULE_API_VERSION = 5
+MODULE_API_VERSION = 6
 
 TAXONOMY_VERSION = (
-    "v1.0 (pending ROSP-24 sign-off; rule updates of 2026-11-16/17, rounds 3-5)"
+    "v1.0 (pending ROSP-24 sign-off; rule updates of 2026-11-16/17, rounds 3-6)"
 )
 
 GITHUB_REPO = "lsst/sp_notebooks"
@@ -201,6 +201,7 @@ WEATHER_REGIMES = (
         "reopen": "stable",  # all closing conditions clear for `stable_min`
         "stable_min": 30,
         "initial": "limits",  # initial opening: below limits (and RH <= rh_do_not_open)
+        "morning_ref": "sunrise",  # no (re-)opening within morning_margin_h of sunrise (page v27-v38 wording)
     },
     {
         "regime": "R2",
@@ -216,6 +217,7 @@ WEATHER_REGIMES = (
         "reopen": "stable",
         "stable_min": 30,
         "initial": "limits",
+        "morning_ref": "sunrise",
     },
     {
         "regime": "R3",
@@ -231,6 +233,7 @@ WEATHER_REGIMES = (
         "reopen": "stable",
         "stable_min": 30,
         "initial": "limits",
+        "morning_ref": "sunrise",
     },
     {
         "regime": "R4",
@@ -248,6 +251,7 @@ WEATHER_REGIMES = (
         "reopen_spread_median": 5.0,
         "reopen_spread_min": 2.0,
         "initial": "spread",  # spread > 2 and stable or rising over 30 min
+        "morning_ref": "twilight",  # no (re-)opening within morning_margin_h of morning -12 deg (v39+)
         "initial_spread": 2.0,
     },
 )
@@ -454,7 +458,7 @@ RULE_NOTES = {
     ),
     "morning_margin_h": (
         "decided",
-        "Weather Constraints: no opening within 1 h of morning -12 deg",
+        "Weather Constraints: no (re-)opening within 1 h of sunrise (R1-R3) or of morning -12 deg (R4)",
     ),
     "dome_open_pct": ("parameter", "MTDome.apertureShutter positionActual0/1"),
     "rain_stale_h": ("parameter", "ESS:301 logevent_precipitation"),
@@ -605,8 +609,14 @@ def _lookup_bins(bin_starts, bin_width_days, values, t):
 # ---------------------------------------------------------------------------------------------------------------
 
 
+SUNRISE_ALT = (
+    -0.833
+)  # apparent sunrise: upper limb on the horizon with standard refraction
+
+
 def night_windows(day_obs_list, twilight_alt=-12.0, now=None):
-    """One row per dayObs whose observable night has started: -12 deg evening to -12 deg morning (TAI MJD)."""
+    """One row per dayObs whose observable night has started: -12 deg evening to -12 deg morning (TAI MJD), with the
+    morning sunrise (for the R1-R3 morning margin)."""
     import rubin_nights.dayobs_utils as rn_dayobs
 
     now_mjd = (Time.now() if now is None else now).tai.mjd
@@ -623,13 +633,30 @@ def night_windows(day_obs_list, twilight_alt=-12.0, now=None):
                 "end": min(end, now_mjd),
                 "full_end": end,
                 "complete": end <= now_mjd,
+                "sunrise": rn_dayobs.day_obs_sunset_sunrise(int(day_obs), SUNRISE_ALT)[
+                    1
+                ].tai.mjd,
             }
         )
     out = pd.DataFrame(
-        rows, columns=["day_obs", "start", "end", "full_end", "complete"]
+        rows, columns=["day_obs", "start", "end", "full_end", "complete", "sunrise"]
     )
     out["night_hours"] = (out.end - out.start) * 24.0
     return out.set_index("day_obs")
+
+
+def add_sunrise(windows):
+    """`windows` with a `sunrise` column (for night tables made before it existed)."""
+    if "sunrise" in windows:
+        return windows
+    import rubin_nights.dayobs_utils as rn_dayobs
+
+    windows = windows.copy()
+    windows["sunrise"] = [
+        rn_dayobs.day_obs_sunset_sunrise(int(d), SUNRISE_ALT)[1].tai.mjd
+        for d in windows.index
+    ]
+    return windows
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -1070,7 +1097,25 @@ def assign_primary_csc(runs, summary_states, rules, narrative=None):
     for r in runs.itertuples():
         quote = ""
         suggested = csc_group(r.suggested_cscs[0]) if r.suggested_cscs else ""
-        if r.onset_source == "no CSC":
+        # A clause that appeared part-way through a FAULT stretch which began without one (set by hand) counts only if
+        # that CSC is still in FAULT when this night's run starts: a short daytime fault inside a hand-set stretch
+        # must not take the night (round 6, 20261116). A stretch that began with its clause keeps it.
+        stale = ""
+        if r.onset_source == "FAULT stretch" and r.onset_time > r.episode_start + tol:
+            known, still = False, False
+            for csc in r.onset_cscs:
+                times, states, _ = summary_states.get(
+                    csc, (np.array([]), np.array([]), None)
+                )
+                if len(times) == 0:
+                    continue
+                known = True
+                k = np.searchsorted(times, r.start + tol, side="right") - 1
+                still |= bool(k >= 0 and states[k] == SUMMARY_STATE_FAULT)
+            if known and not still:
+                stale = ", ".join(r.onset_cscs)
+                suggested = csc_group(r.onset_cscs[0])
+        if r.onset_source == "no CSC" or stale:
             best, best_t = None, np.inf
             for csc, (times, states, _) in summary_states.items():
                 if len(times) == 0:
@@ -1141,6 +1186,8 @@ def assign_primary_csc(runs, summary_states, rules, narrative=None):
                     else "only CSC named"
                 ) + where
             group = csc_group(primary)
+        if stale:
+            rule += f" (the {stale} clause from earlier in the stretch had recovered)"
         for key, v in zip(out, (primary, rule, entered, group, suggested, quote)):
             out[key].append(v)
     runs = runs.copy()
@@ -1460,7 +1507,16 @@ def _standby_pass(
     """One pass of the per-minute standby state machine for one night (see weather_minutes)."""
     pp = dict(rules.post_precip)
     spread_med30, spread_min30, spread_prev30, gust_ok, humid = derived
-    last_morning = w.full_end - rules.morning_margin_h / 24.0
+    # No (re-)opening within the morning margin: of sunrise for R1-R3 (page v27-v38), of morning -12 deg for R4.
+    by_sunrise = R.get("morning_ref", "twilight") == "sunrise"
+    last_morning = (
+        w.sunrise if by_sunrise else w.full_end
+    ) - rules.morning_margin_h / 24.0
+    margin_why = (
+        f"within 1 h of sunrise ({R['regime']})"
+        if by_sunrise
+        else f"within 1 h of morning -12 deg ({R['regime']})"
+    )
     n = len(t)
     standby = np.zeros(n, dtype=bool)
     reason = np.full(n, "", dtype=object)
@@ -1523,7 +1579,7 @@ def _standby_pass(
                 why = (
                     f"re-opening criteria not met ({R['regime']})"
                     if t[i] < last_morning
-                    else "within 1 h of morning -12 deg"
+                    else margin_why
                 )
         elif not opened_once:
             if R["initial"] == "spread":
@@ -1541,7 +1597,7 @@ def _standby_pass(
                 why = (
                     f"initial-opening criteria not met ({R['regime']})"
                     if t[i] < last_morning
-                    else "within 1 h of morning -12 deg"
+                    else margin_why
                 )
         if not why and t[i] < rain_hold and hold_ok[i]:
             why, provisional = "post-precipitation hold (provisional)", True
@@ -1597,6 +1653,7 @@ def weather_minutes(env, cam, rain, windows, rules, logs=None):
         out = pd.DataFrame(columns=cols)
         out.attrs["hold_episodes"] = pd.DataFrame(columns=ep_cols)
         return out
+    windows = add_sunrise(windows)
     pp = dict(rules.post_precip)
     lead = rules.standby_lead_h / 24.0
     t_env = env.t.values
@@ -2997,6 +3054,7 @@ def episode_summary(episodes):
     d1, d2 = episodes[episodes["class"] == "D1"], episodes[episodes["class"] == "D2"]
     return {
         "episodes": len(episodes),
+        "FAULT hours (of which under weather)": f"{episodes.hours.sum():.2f} ({episodes.under_weather_h.sum():.2f})",
         "FAULT hours": round(float(episodes.hours.sum()), 2),
         "hidden by weather (h)": round(float(episodes.under_weather_h.sum()), 2),
         "in the ledger's D1/D2 (h)": round(float(episodes.in_ledger_D_h.sum()), 2),
