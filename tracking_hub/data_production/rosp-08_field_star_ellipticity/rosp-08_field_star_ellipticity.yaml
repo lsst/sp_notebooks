@@ -1,5 +1,13 @@
 title: 'ROSP-8: Field star ellipticity'
-description: Field star ellipticity. PTH Tier 1 metric — stub, not yet implemented.
+description: >
+  PSF ellipticity of LSSTCam science visits from the PSF second moments: |e| of a visit is the median over its science
+  detectors of the per-detector ellipticity (ccdvisit1_quicklook psf_ixx, psf_ixy, psf_iyy); e1 and e2 are those of the
+  detector-median moments (visit1_quicklook psf_ixx_median, psf_ixy_median, psf_iyy_median).
+  Per band and for all bands: median with 25 / 75 % per band, nightly
+  series with quartile whiskers, histograms, binned medians against telescope elevation, physical rotator angle and the
+  delivered PSF FWHM, the elevation dependence in the alt-az frame, and a comparison with the SRD SE1 / SE2 / EF1 for
+  r and i near the zenith.
+  Visits need at least min_psf_stars PSF stars. PTH Tier 1 metric, draft method.
 authors:
   - name: Elana Urbach
 tags:
@@ -8,7 +16,6 @@ tags:
   - rosp-08
   - category-2
   - layer-2
-  - stub
 parameters:
   start_dayobs:
     type: integer
@@ -18,3 +25,15 @@ parameters:
     type: integer
     description: Last dayObs (inclusive)
     default: 20261231
+  science_programs:
+    type: string
+    description: Comma-separated science programs (bare numbers become BLOCK-<n>); empty for all programs
+    default: "407, 408, 416, 417, 419, 421"
+  min_psf_stars:
+    type: integer
+    description: Drop visits with fewer PSF stars (visit1_quicklook.n_psf_star_total) than this; 0 disables the cut
+    default: 50
+  use_cache:
+    type: boolean
+    description: Cache the ConsDB pull as parquet under ./cache (only honoured outside Times Square)
+    default: false
