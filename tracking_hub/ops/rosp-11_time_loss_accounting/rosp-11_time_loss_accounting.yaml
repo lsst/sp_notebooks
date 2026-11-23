@@ -1,5 +1,20 @@
 title: 'ROSP-11: Time-loss accounting (weather / fault / scheduled)'
-description: Time-loss accounting (weather / fault / scheduled). PTH Tier 1 metric — stub, not yet implemented.
+description: >
+  Time-loss ledger of the observable night (Sun -12 to -12 deg, weather not excluded). Every hour of every night is
+  assigned to one ROSP-24 category (A science, B scheduled, C weather, D fault, E idle, F unattributed) by the
+  precedence B1 -> C -> B2 -> D (D2, D1, D4, D3) -> E -> A -> F, from the EFD observatory states (applied first,
+  never edited), the shared observatory_state_overrides.csv read from main and pinned to its commit SHA, ConsDB
+  visits with the rubin_scheduler slew model, the weather tower, the dome shutter, the
+  inside dew-point sensors and, where available, the deep allskycam index, with the rule updates of 2026-11-16/17
+  and round 3 (B2 only while available; BLOCK-T539 by context, start-up or recovery; A3 from -12 deg; measured
+  weather inside override D4; C3 weather standby by Weather Constraints regime R1-R4, thick cloud C1 only where
+  the regime has a cloud criterion; post-precipitation holds and icing only with log evidence; D3 cap; a hand-set
+  FAULT takes its group from the narrative log, else Operations decision), with a ROSP-12 fault-episode table and
+  per-night sensor coverage. Round 5: R1-R2 RH > 70 % with the dome closed is C1; ROSP-12 episodes by CSC with no science between.
+  Reports the per-night ledger, cycle fractions by category with the short losses (D1 + E), fault loss by
+  subsystem group, the shadow record (never added to the totals), the sensitivity to the rules still pending, and
+  the pending attribution corrections as a what-if (not applied).
+  PTH Tier 1 metric, method rosp-11-v1.0 draft on taxonomy v1.0 (pending ROSP-24 sign-off).
 authors:
   - name: Brian Stalder
 tags:
@@ -8,7 +23,7 @@ tags:
   - rosp-11
   - category-1
   - layer-3
-  - stub
+  - draft
 parameters:
   start_dayobs:
     type: integer
@@ -16,5 +31,9 @@ parameters:
     default: 20260629
   end_dayobs:
     type: integer
-    description: Last dayObs (inclusive)
+    description: Last dayObs (inclusive); nights that have not started are skipped
     default: 20261231
+  verbose:
+    type: boolean
+    description: Show the detail tables (fault runs, episodes, log evidence, C3 and shadow-record detail)
+    default: false
