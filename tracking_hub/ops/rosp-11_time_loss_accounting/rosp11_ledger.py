@@ -33,7 +33,7 @@ from astropy.time import Time, TimeDelta
 
 # Bumped whenever a function signature or a returned column changes, so the notebook can refuse a module
 # that does not match it (on Times Square the module is fetched from GitHub, not read from the checkout).
-MODULE_API_VERSION = 6
+MODULE_API_VERSION = 7
 
 TAXONOMY_VERSION = (
     "v1.0 (pending ROSP-24 sign-off; rule updates of 2026-11-16/17, rounds 3-6)"
@@ -1751,7 +1751,9 @@ def weather_minutes(env, cam, rain, windows, rules, logs=None):
             ],
             "",
         )
-        known = np.isfinite(rh) | np.isfinite(wind.values) | cloud_known
+        # Weather is known where the tower or the allskycam reports, and wherever any sensor positively meets a
+        # closing criterion (rain, inside / glass sensors, gusts), so a tower outage cannot hide a measured closure.
+        known = np.isfinite(rh) | np.isfinite(wind.values) | cloud_known | close_nc
         with np.errstate(invalid="ignore"):
             dome_open = e.shutter.values > rules.dome_open_pct
             derived = (
@@ -2833,6 +2835,9 @@ def fault_episodes(
     stretch on its own. `on_override` False keeps the runs off override nights (the ROSP-12 headline), True only
     the runs on override nights (listed stretch by stretch: there is no science to separate them).
 
+    A stretch that an override night interrupts (the FAULT carried through it) is split there, and the part after
+    the override night starts at its first run.
+
     `hours` are FAULT hours inside observable nights, whatever the ledger charged them to; `under_weather_h` is the
     part in C (the shadow record). `class` is D2 if any of its nights is a whole-night fault by the ROSP-49 rule (no
     survey science visit, FAULT covering the night to within d2_tolerance_min), else D1. D1: `mttr_h` from the first
@@ -2893,11 +2898,26 @@ def fault_episodes(
         c = g.primary_csc.iloc[0]
         return "" if c is None or (isinstance(c, float) and np.isnan(c)) else str(c)
 
+    ov = overrides if overrides is not None and len(overrides) else None
+
+    def split_at_overrides(g):
+        # An unbroken FAULT carried through an override night leaves runs on both sides of it once the override
+        # night's run is removed; the parts are separate stretches, so the override barrier below applies to them.
+        g = g.sort_values("start").assign(after_override=False)
+        if ov is None or on_override or len(g) < 2:
+            return [g]
+        cut = [
+            i
+            for i in range(1, len(g))
+            if ((ov.t0 < g.start.iloc[i]) & (ov.t1 > g.end.iloc[i - 1])).any()
+        ]
+        parts = [g.iloc[a:b] for a, b in zip([0] + cut, cut + [len(g)])]
+        return [parts[0]] + [p.assign(after_override=True) for p in parts[1:]]
+
     stretches = sorted(
-        (g.sort_values("start") for _, g in r.groupby("key", sort=False)),
+        (p for _, g in r.groupby("key", sort=False) for p in split_at_overrides(g)),
         key=lambda x: x.start.iloc[0],
     )
-    ov = overrides if overrides is not None and len(overrides) else None
     merged = []
     for g in stretches:
         if merged and join != "none":
@@ -2975,7 +2995,9 @@ def fault_episodes(
         rows.append(
             {
                 "episode": n_ep + 1,
-                "start_utc": tai_mjd_to_utc_iso(first.episode_start)[:16],
+                "start_utc": tai_mjd_to_utc_iso(
+                    first.start if first.after_override else first.episode_start
+                )[:16],
                 "end_utc": tai_mjd_to_utc_iso(last.end)[:16]
                 + (
                     " (data end)"
@@ -3308,8 +3330,21 @@ def ledger_delta(base, seg):
     return by_cat[by_cat.abs() > 0.005], by_group[by_group.abs() > 0.005]
 
 
+def _moved_hours(by_group):
+    """Hours leaving a (category, fault group) cell, and the part leaving a D1 / D2 cell, from ledger_delta."""
+    out = [(str(k), -float(v)) for k, v in by_group.items() if v < 0]
+    return {
+        "moved_h": sum(v for _, v in out),
+        "fault_moved_h": sum(v for k, v in out if k.startswith(("D1 / ", "D2 / "))),
+    }
+
+
 def what_if_table(inputs, base, corrections):
-    """One row per correction: what it would move, applied alone; and a last row with all applied together."""
+    """One row per correction: what it would move, applied alone; and a last row with all applied together.
+
+    `moved_h` is the hours that leave a (category, fault group) cell; `fault_moved_h` the part that leaves a D1 / D2
+    cell (0 for a correction that changes nothing, NaN for a note).
+    """
     rows = []
     for c in corrections:
         if c["kind"] == "note":
@@ -3319,6 +3354,8 @@ def what_if_table(inputs, base, corrections):
                     "status": c.get("status", ""),
                     "evidence": c.get("evidence", ""),
                     "moves": c.get("moves", "not applied"),
+                    "moved_h": np.nan,
+                    "fault_moved_h": np.nan,
                 }
             )
             continue
@@ -3331,13 +3368,14 @@ def what_if_table(inputs, base, corrections):
                 "status": c.get("status", ""),
                 "evidence": c.get("evidence", ""),
                 "moves": moves or "no change",
+                **_moved_hours(by_group),
             }
         )
     applicable = [
         c for c in corrections if c["kind"] != "note" and not c.get("conditional")
     ]
     seg_all = ledger_with_corrections(inputs, applicable)
-    by_cat, _ = ledger_delta(base, seg_all)
+    by_cat, by_group_all = ledger_delta(base, seg_all)
     rows.append(
         {
             "correction": f"all {len(applicable)} non-conditional corrections together",
@@ -3347,6 +3385,7 @@ def what_if_table(inputs, base, corrections):
                 f"{k} {v:+.2f} h" for k, v in by_cat.sort_values().items()
             )
             or "no change",
+            **_moved_hours(by_group_all),
         }
     )
     return pd.DataFrame(rows).set_index("correction"), seg_all
