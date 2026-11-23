@@ -33,3 +33,7 @@ parameters:
     type: integer
     description: Last dayObs (inclusive); nights that have not started are skipped
     default: 20261231
+  verbose:
+    type: boolean
+    description: Show the detail tables (fault runs, episodes, log evidence, C3 and shadow-record detail)
+    default: false
