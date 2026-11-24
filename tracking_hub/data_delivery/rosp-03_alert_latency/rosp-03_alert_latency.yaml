@@ -1,5 +1,5 @@
 title: 'ROSP-3: Alert generation latency and completeness'
-description: Alert generation latency and completeness. PTH Tier 1 metric — stub, not yet implemented.
+description: Alert generation latency and completeness.
 authors:
   - name: Colin Slater
 tags:
@@ -10,11 +10,11 @@ tags:
   - layer-1
   - stub
 parameters:
-  start_dayobs:
+  day_obs_start:
     type: integer
     description: First dayObs (inclusive)
     default: 20260629
-  end_dayobs:
+  day_obs_end:
     type: integer
     description: Last dayObs (inclusive)
     default: 20261231
